@@ -106,7 +106,7 @@ td,th{font-size:10.5pt}
 /* ===== الصفحات الداخلية: نفس صورة الطراد بطبقة كحلية أغمق (للشاشة فقط، الطباعة تبقى بيضاء) ===== */
 @media screen{
 body.app-bg{color:#e2e8f0;background-color:var(--navy);
-  background-image:linear-gradient(rgba(6,22,44,.84),rgba(6,22,44,.93)),url(bg.png);
+  background-image:linear-gradient(rgba(10,35,66,.62),rgba(10,35,66,.8)),url(bg.png);
   background-size:cover,cover;background-position:center,center;background-repeat:no-repeat;background-attachment:fixed,fixed}
 body.app-bg header{background:rgba(10,35,66,.92);backdrop-filter:blur(6px);position:sticky;top:0;z-index:5}
 body.app-bg .demo{background:rgba(120,53,15,.55);color:#fed7aa;border-color:rgba(253,186,116,.25)}

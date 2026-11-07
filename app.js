@@ -109,21 +109,21 @@
     var body = route.view(r.q, u);
     var msgs = flashes.map(function (m) { return '<p class="msg ' + m.type + '">' + esc(m.text) + "</p>"; }).join("");
     flashes = [];
+    document.body.classList.toggle("auth-bg", !u);
     document.getElementById("app").innerHTML = shell(u, r.path) + "<main>" + msgs + body + "</main>";
     window.scrollTo(0, 0);
     if (route.after) route.after();
   }
 
   function shell(u, path) {
+    if (!u) return ""; // صفحات الدخول والتسجيل: خلفية كاملة بدون هيدر
     var h = '<header><img src="logo.png" alt=""><div class="t"><b>الإدارة العامة لخفر السواحل</b><span>قسم الكهرباء والإلكترونيات</span></div>';
-    if (u) {
-      h += '<span class="u">' + esc(u.full_name) + " (" + ROLES[u.role] + ")</span>";
-      if (u.role === "s") h += '<a href="#/users">الحسابات والصلاحيات</a>';
-      h += '<button type="button" data-act="logout">خروج</button>';
-    }
+    h += '<span class="u">' + esc(u.full_name) + " (" + ROLES[u.role] + ")</span>";
+    if (u.role === "s") h += '<a href="#/users">الحسابات والصلاحيات</a>';
+    h += '<button type="button" data-act="logout">خروج</button>';
     h += "</header>";
     h += '<div class="demo noprint"><span>⚠️ نسخة عرض تجريبية — البيانات محفوظة في هذا المتصفح فقط. لا تُدخل أرقام سرية أو بيانات حقيقية.</span><button type="button" data-act="reset">إعادة ضبط البيانات التجريبية</button></div>';
-    if (u) {
+    {
       var links = [["my", "طلباتي", "ehoas"], ["review", "مراجعة الطلبات", "hos"], ["queue", "طلبات للتنفيذ", "as"], ["stats", "الإحصائيات", "hoas"]];
       h += '<nav class="nav noprint">' + links.filter(function (l) { return l[2].indexOf(u.role) >= 0; }).map(function (l) {
         return '<a href="#/' + l[0] + '"' + (l[0] === path ? ' class="on"' : "") + ">" + l[1] + "</a>";
@@ -155,14 +155,18 @@
   function viewLogin() {
     var s = loginState; loginState = { errs: null, val: {} };
     var demo = load().users.filter(function (u) { return ["admin", "head", "officer", "clerk", "emp", "emp2"].indexOf(u.username) >= 0 && u.password === "123456"; });
-    return '<div class="auth"><div class="hero"><img src="logo.png" alt=""><h1>نظام الطلبات الإدارية</h1><p class="sub">قسم الكهرباء والإلكترونيات</p></div>' +
-      '<form class="box" data-f="login">' + (s.errs ? '<p class="err">' + esc(s.errs) + "</p>" : "") +
+    return '<div class="auth">' + authHero() +
+      '<form data-f="login">' + (s.errs ? '<p class="err">' + esc(s.errs) + "</p>" : "") +
       field("username", "اسم المستخدم", { autocomplete: "username", required: "" }, null, s.val.username) +
       field("password", "كلمة المرور", { type: "password", autocomplete: "current-password", required: "" }) +
-      '<p><button class="p">دخول</button></p><p><a href="#/register">موظف جديد؟ سجّل حسابك</a></p></form>' +
-      (demo.length ? '<div class="card"><b>حسابات تجريبية</b> <span class="sub">(كلمة المرور 123456)</span><div class="demo-users">' + demo.map(function (u) {
-        return '<button type="button" data-act="quick" data-u="' + esc(u.username) + '">' + esc(u.username) + "<small>" + ROLES[u.role] + " — " + esc(u.full_name) + "</small></button>";
-      }).join("") + "</div></div>" : "") + "</div>";
+      '<button class="p wide">دخول</button><a class="btn-out" href="#/register">موظف جديد؟ سجّل حسابك</a></form>' +
+      (demo.length ? '<div class="demo-box"><p>حسابات تجريبية (كلمة المرور <b>123456</b>) — اضغط للدخول مباشرة:</p><div class="demo-users">' + demo.map(function (u) {
+        return '<button type="button" data-act="quick" data-u="' + esc(u.username) + '">' + esc(u.username) + "<small>" + ROLES[u.role] + "</small></button>";
+      }).join("") + "</div></div>" : "") +
+      '<p class="note">نسخة تجريبية — أي بيانات تدخلها هنا والطلبات تُحفظ في هذا المتصفح فقط.</p></div>';
+  }
+  function authHero() {
+    return '<div class="hero"><img src="logo.png" alt=""><h1>الإدارة العامة لخفر السواحل</h1><p>قسم الكهرباء والإلكترونيات</p></div>';
   }
   function doLogin(d) {
     var u = load().users.filter(function (x) { return x.username.toLowerCase() === (d.username || "").toLowerCase(); })[0];
@@ -174,7 +178,7 @@
   var regState = { errs: {}, val: {} };
   function viewRegister() {
     var s = regState; regState = { errs: {}, val: {} };
-    return '<div class="auth"><h2>تسجيل موظف جديد</h2><form class="box" data-f="register">' +
+    return '<div class="auth">' + authHero() + '<h2>تسجيل موظف جديد</h2><form data-f="register">' +
       field("username", "اسم المستخدم", { required: "" }, s.errs, s.val.username) +
       field("full_name", "الاسم الثلاثي", { required: "" }, s.errs, s.val.full_name) +
       field("job_title", "المسمى الوظيفي", { required: "" }, s.errs, s.val.job_title) +
@@ -182,7 +186,7 @@
       field("phone", "رقم التلفون", { required: "", inputmode: "numeric", maxlength: "8" }, s.errs, s.val.phone) +
       field("password1", "كلمة المرور", { type: "password", required: "", autocomplete: "new-password" }, s.errs) +
       field("password2", "تأكيد كلمة المرور", { type: "password", required: "", autocomplete: "new-password" }, s.errs) +
-      '<p><button class="p">إنشاء الحساب</button></p><p><a href="#/login">عندك حساب؟ سجّل دخولك</a></p></form></div>';
+      '<button class="p wide">إنشاء الحساب</button><a class="btn-out" href="#/login">عندك حساب؟ سجّل دخولك</a></form></div>';
   }
   function doRegister(d) {
     var e = {}, D = load();

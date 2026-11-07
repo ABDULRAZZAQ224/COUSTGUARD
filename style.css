@@ -36,11 +36,24 @@ button.p:hover,.card button:hover,.flt button:hover{filter:brightness(.93)}
 .b{display:inline-block;padding:1px 10px;border-radius:99px;font-size:13px;font-weight:700}
 .b.p{background:var(--waitbg);color:var(--wait)}.b.a{background:var(--okbg);color:var(--ok)}.b.r{background:var(--badbg);color:var(--bad)}
 .sub{color:var(--mut);font-size:14px}
-.auth{max-width:440px;margin:24px auto}
-.auth .hero{text-align:center;margin-bottom:10px}.auth .hero img{width:90px}.auth .hero h1{font-size:20px;color:var(--navy);margin:6px 0 0}
-.demo-users{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
-.demo-users button{background:#eef2f7;color:var(--navy);border:1px solid var(--line);border-radius:8px;padding:6px;font:inherit;font-size:13px;cursor:pointer;text-align:right}
-.demo-users button small{display:block;color:var(--mut)}
+/* صفحات الدخول: صورة خلفية (bg.jpg) مع طبقة كحلية فوقها */
+body.auth-bg{min-height:100vh;background:linear-gradient(rgba(10,35,66,.55),rgba(10,35,66,.72)),url(bg.jpg) center/cover no-repeat fixed,linear-gradient(160deg,#0a2342,#123a66 60%,#0a2342)}
+body.auth-bg main{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 16px}
+body.auth-bg main>.msg{width:100%;max-width:400px}
+.auth{width:100%;max-width:400px;background:#fff;border-radius:14px;border-top:5px solid var(--or);padding:22px 22px 16px;box-shadow:0 18px 50px #0007}
+.auth .hero{text-align:center;margin-bottom:12px}.auth .hero img{width:78px}
+.auth .hero h1{font-size:19px;color:var(--navy);margin:8px 0 0;font-weight:800}.auth .hero p{margin:2px 0 0;color:var(--or);font-weight:700;font-size:14px}
+.auth h2{text-align:center;font-size:17px;margin:6px 0}
+.auth label{font-size:13px}
+.auth input{border-color:#94a3b8;border-radius:10px}
+button.p.wide{width:100%;margin-top:14px;padding:11px;border-radius:10px}
+.btn-out{display:block;text-align:center;margin-top:10px;padding:10px;border:1.5px solid var(--navy);border-radius:10px;color:var(--navy);font-weight:700;text-decoration:none}
+.btn-out:hover{background:#eef2f7}
+.demo-box{margin-top:14px;font-size:12px;color:var(--mut);text-align:center}.demo-box p{margin:0 0 6px}
+.demo-users{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.demo-users button{background:#f1f5f9;color:var(--navy);border:1px solid var(--line);border-radius:8px;padding:4px;font:inherit;font-size:12px;font-weight:700;cursor:pointer}
+.demo-users button small{display:block;color:var(--mut);font-weight:400}
+.auth .note{font-size:11.5px;color:var(--mut);text-align:center;margin:12px 0 0}
 .modal{position:fixed;inset:0;background:#0009;display:flex;align-items:center;justify-content:center;padding:16px;z-index:9}
 .modal[hidden]{display:none}
 .modal-box{background:#fff;border-radius:12px;padding:16px;max-width:min(720px,100%);max-height:90vh;overflow:auto;position:relative}

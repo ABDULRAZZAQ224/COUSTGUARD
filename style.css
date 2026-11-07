@@ -102,3 +102,58 @@ td,th{font-size:10.5pt}
 .sig{display:grid;grid-template-columns:repeat(3,1fr);gap:28px;margin-top:30px;break-inside:avoid}.sig div{text-align:center}.sig span{font-weight:700;color:#0a2342}.sig i{display:block;border-bottom:1px solid #0a2342;height:38px;margin-bottom:4px}
 .ft{display:block;text-align:center;font-size:8.5pt;color:#64748b;margin-top:18px;border-top:1px solid #cbd5e1;padding-top:4px}
 }
+
+/* ===== الصفحات الداخلية: نفس صورة الطراد بطبقة كحلية أغمق (للشاشة فقط، الطباعة تبقى بيضاء) ===== */
+@media screen{
+body.app-bg{color:#e2e8f0;background-color:var(--navy);
+  background-image:linear-gradient(rgba(6,22,44,.84),rgba(6,22,44,.93)),url(bg.png);
+  background-size:cover,cover;background-position:center,center;background-repeat:no-repeat;background-attachment:fixed,fixed}
+body.app-bg header{background:rgba(10,35,66,.92);backdrop-filter:blur(6px);position:sticky;top:0;z-index:5}
+body.app-bg .demo{background:rgba(120,53,15,.55);color:#fed7aa;border-color:rgba(253,186,116,.25)}
+body.app-bg .demo button{color:#fed7aa;border-color:rgba(253,186,116,.5)}
+body.app-bg .nav{background:rgba(10,35,66,.7);border-color:rgba(255,255,255,.1)}
+body.app-bg .nav a{background:rgba(255,255,255,.08);color:#e2e8f0}
+body.app-bg .nav a.on{background:var(--or);color:#fff}
+body.app-bg h2,body.app-bg h3.sh,body.app-bg .rt h1{color:#fff}
+body.app-bg a{color:#fdba74}
+body.app-bg .sub{color:#94a3b8}
+body.app-bg .card,body.app-bg form.box{background:rgba(10,35,66,.78);border:1px solid rgba(255,255,255,.12);box-shadow:0 8px 24px rgba(0,0,0,.25);backdrop-filter:blur(4px)}
+body.app-bg .card h3{color:#fff}
+body.app-bg label{color:#cbd5e1}
+body.app-bg input,body.app-bg select,body.app-bg textarea{background:rgba(6,22,44,.65);border-color:rgba(255,255,255,.18);color:#fff;color-scheme:dark}
+body.app-bg input::placeholder,body.app-bg textarea::placeholder{color:#7b8aa3}
+body.app-bg select option{background:#0a2342}
+body.app-bg .msg{background:rgba(232,80,28,.18);color:#fed7aa}
+body.app-bg .msg.ok{background:rgba(21,128,61,.25);color:#bbf7d0}
+body.app-bg .msg.err{background:rgba(185,28,28,.28);color:#fecaca}
+body.app-bg .fu{color:#fb923c}
+body.app-bg .ok{color:#4ade80}
+body.app-bg .err{color:#fca5a5}
+body.app-bg table{background:rgba(10,35,66,.7)}
+body.app-bg td{border-color:rgba(255,255,255,.14)}
+body.app-bg th{border-color:rgba(255,255,255,.14)}
+body.app-bg tbody tr:nth-child(even){background:rgba(255,255,255,.04)}
+body.app-bg .meta th{background:rgba(255,255,255,.08);color:#fff}
+body.app-bg .kp div{background:rgba(10,35,66,.85)}
+body.app-bg .rt p{color:#fb923c}
+}
+
+/* ترحيب + مربعات العدّادات */
+.hello{display:inline-block;background:rgba(10,35,66,.85);color:#fff;font-weight:800;font-size:17px;padding:8px 14px;border-radius:8px;border-right:4px solid var(--or);margin:4px 0 14px}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.tiles>*{display:block;text-align:center;text-decoration:none;color:#fff!important;background:rgba(10,35,66,.85);border:1px solid rgba(255,255,255,.12);border-bottom:3px solid var(--or);border-radius:10px;padding:12px 6px;font-size:13px;transition:transform .15s}
+.tiles a:hover{transform:translateY(-2px)}
+.tiles .on{border-color:var(--or);box-shadow:0 0 0 1px var(--or) inset}
+.tiles b{display:block;font-size:26px;line-height:1.2}
+@media(max-width:560px){.tiles>*{font-size:12px;padding:10px 4px}.tiles b{font-size:22px}}
+/* رأس البطاقة + حالة */
+.ch{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.pill{flex:none;font-size:12px;font-weight:700;padding:2px 10px;border-radius:99px;white-space:nowrap}
+.pill.g{background:#dcfce7;color:#15803d}.pill.r{background:#fee2e2;color:#b91c1c}.pill.y{background:#fef3c7;color:#a16207}.pill.f{background:#ffe4e6;color:#be123c}
+/* أزرار التنفيذ */
+.qa{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.qa input{grid-column:1/-1;margin:0}
+.card .qa button.o{background:transparent;border:1.5px solid rgba(255,255,255,.5);color:#fff}
+.card .qa button.o:hover{background:rgba(255,255,255,.08)}
+.wa{display:block;text-align:center;margin-top:8px;padding:10px;border-radius:8px;background:#16a34a;color:#fff!important;font-weight:700;text-decoration:none}
+.wa:hover{filter:brightness(.93)}

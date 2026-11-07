@@ -110,6 +110,7 @@
     var msgs = flashes.map(function (m) { return '<p class="msg ' + m.type + '">' + esc(m.text) + "</p>"; }).join("");
     flashes = [];
     document.body.classList.toggle("auth-bg", !u);
+    document.body.classList.toggle("app-bg", !!u);
     document.getElementById("app").innerHTML = shell(u, r.path) + "<main>" + msgs + body + "</main>";
     window.scrollTo(0, 0);
     if (route.after) route.after();
@@ -226,7 +227,9 @@
     var t = new Date(), n = used(u.id, t.getFullYear(), t.getMonth()), v = s.val, e = s.errs;
     var items = load().reqs.filter(function (r) { return r.user_id === u.id; }).sort(byCreated);
     ROUTES.my.after = toggleKind;
-    return '<p class="msg">استئذاناتك هذا الشهر: <b>' + n + " من " + LIMIT + "</b> (الحد الأعلى " + LIMIT + "، وأي استئذان زيادة يرفضه النظام تلقائياً)</p>" +
+    var cnt = function (st) { return items.filter(function (r) { return r.status === st; }).length; };
+    return hello(u, [[n + " / " + LIMIT, "استئذانات هذا الشهر"], [cnt("p"), "قيد المراجعة"], [cnt("a"), "موافق"]]) +
+      '<p class="msg">استئذاناتك هذا الشهر: <b>' + n + " من " + LIMIT + "</b> (الحد الأعلى " + LIMIT + "، وأي استئذان زيادة يرفضه النظام تلقائياً)</p>" +
       "<h2>طلب جديد</h2>" +
       '<form class="box" data-f="req">' +
       select("kind", "نوع الطلب", KINDS, e, v.kind) +
@@ -311,16 +314,30 @@
   }
   function byName(list, q) { return q ? list.filter(function (r) { return uname(r.user_id).indexOf(q) >= 0; }) : list; }
 
-  function viewReview(q) {
-    var f = q.f || "p", s = (q.q || "").trim();
-    var items = load().reqs.filter(function (r) { return f === "all" || r.status === f; });
-    items = byName(items, s).sort(byCreated);
-    return "<h2>مراجعة الطلبات</h2>" + filterBar("review", s, f, [["p", "قيد المراجعة"], ["a", "موافق"], ["r", "مرفوض"], ["all", "الكل"]]) + cards(items, "review");
+  // ترحيب + مربعات عدّادات: [[العدد، العنوان، رابط اختياري، مفعّل؟]]
+  function hello(u, tiles) {
+    return '<div class="hello">أهلاً، ' + esc((u.full_name || u.username).split(" ")[0]) + "</div>" +
+      '<div class="tiles">' + tiles.map(function (t) {
+        var tag = t[2] ? "a" : "div";
+        return "<" + tag + (t[2] ? ' href="' + t[2] + '"' : "") + (t[3] ? ' class="on"' : "") + "><b>" + t[0] + "</b>" + t[1] + "</" + tag + ">";
+      }).join("") + "</div>";
   }
-  function viewQueue(q) {
+  function viewReview(q, u) {
+    var f = q.f || "p", s = (q.q || "").trim(), all = load().reqs;
+    var cnt = function (st) { return all.filter(function (r) { return r.status === st; }).length; };
+    var items = all.filter(function (r) { return f === "all" || r.status === f; });
+    items = byName(items, s).sort(byCreated);
+    return hello(u, [[cnt("p"), "قيد المراجعة", "#/review?f=p", f === "p"], [cnt("a"), "موافق", "#/review?f=a", f === "a"], [cnt("r"), "مرفوض", "#/review?f=r", f === "r"]]) +
+      filterBar("review", s, f, [["p", "قيد المراجعة"], ["a", "موافق"], ["r", "مرفوض"], ["all", "الكل"]]) + cards(items, "review");
+  }
+  function viewQueue(q, u) {
     var f = q.f || "all", s = (q.q || "").trim();
     // الإداري ما يشوف إلا اللي قرر عليه رئيس القسم/الضابط
-    var items = load().reqs.filter(function (r) { return r.status !== "p" && !r.auto_rejected; }).filter(function (r) {
+    var base = load().reqs.filter(function (r) { return r.status !== "p" && !r.auto_rejected; });
+    var nNew = base.filter(function (r) { return !r.done_at && !r.followups.length; }).length,
+        nFu = base.filter(function (r) { return !r.done_at && r.followups.length; }).length,
+        nDone = base.filter(function (r) { return r.done_at; }).length;
+    var items = base.filter(function (r) {
       if (f === "n") return !r.done_at && !r.followups.length;
       if (f === "f") return !r.done_at && r.followups.length;
       if (f === "d") return !!r.done_at;
@@ -328,12 +345,14 @@
       return true;
     });
     items = byName(items, s).sort(byCreated);
-    return "<h2>طلبات للتنفيذ</h2>" + filterBar("queue", s, f, [["all", "الكل"], ["n", "جديد بانتظار الإجراء"], ["f", "يرجى المتابعة"], ["d", "تم عمل اللازم"], ["r", "مرفوض"]]) + cards(items, "queue");
+    return hello(u, [[nNew, "جديد بانتظار الإجراء", "#/queue?f=n", f === "n"], [nFu, "يرجى المتابعة", "#/queue?f=f", f === "f"], [nDone, "تم عمل اللازم", "#/queue?f=d", f === "d"]]) +
+      filterBar("queue", s, f, [["all", "الكل"], ["n", "جديد بانتظار الإجراء"], ["f", "يرجى المتابعة"], ["d", "تم عمل اللازم"], ["r", "مرفوض"]]) + cards(items, "queue");
   }
   function cards(items, mode) {
     if (!items.length) return "<p>لا توجد طلبات.</p>";
     return items.map(function (r) {
-      var u = userById(r.user_id) || {}, h = '<div class="card"><h3>' + esc(u.full_name) + " — " + KINDS[r.kind] + "</h3>";
+      var u = userById(r.user_id) || {}, st = pill(r, mode);
+      var h = '<div class="card"><div class="ch"><h3>' + esc(u.full_name) + " — " + KINDS[r.kind] + '</h3><span class="pill ' + st[0] + '">' + st[1] + "</span></div>";
       h += '<p class="sub">' + esc(u.job_title) + " — هاتف: " + esc(u.phone) + (mode === "queue" ? " — مدني: " + esc(u.civil_id) : "") + "</p>";
       h += "<p>" + (r.perm_period ? PERIODS[r.perm_period] + " — " : "") + esc(r.date_from) + (r.date_to ? " إلى " + esc(r.date_to) : "") +
         (r.time_from ? " من " + esc(r.time_from) + (r.time_to ? " إلى " + esc(r.time_to) : "") : "") + (r.meet_with ? " — المقابلة مع: " + esc(r.meet_with) : "") + "</p>";
@@ -347,11 +366,32 @@
       }
       if (mode === "queue" && !r.done_at) {
         if (r.secret) h += '<p>الرقم السري: <span id="s' + r.id + '">••••••</span> <button type="button" class="s" data-act="reveal" data-id="' + r.id + '">إظهار</button></p>';
-        h += '<form class="acts" data-f="followup" data-id="' + r.id + '"><input name="note" placeholder="شنو المطلوب متابعته"><button>يرجى المتابعة</button></form>';
-        h += '<form class="acts" data-f="done" data-id="' + r.id + '"><button class="g">تم عمل اللازم</button></form>';
+        h += '<form class="qa" data-f="qact" data-id="' + r.id + '"><input name="note" placeholder="شنو المطلوب متابعته (للمتابعة فقط)">' +
+          '<button class="g" name="do" value="done">تم عمل اللازم</button><button class="o" name="do" value="follow">يرجى المتابعة</button></form>';
       }
+      if (mode === "queue" && u.phone) h += '<a class="wa" target="_blank" rel="noopener" href="' + waLink(r, u) + '">أرسل واتساب</a>';
       return h + "</div>";
     }).join("");
+  }
+  // لون ونص حالة الطلب في رأس البطاقة
+  function pill(r, mode) {
+    if (mode === "queue") {
+      if (r.status === "r") return ["r", "مرفوض"];
+      if (r.done_at) return ["g", "تم عمل اللازم"];
+      if (r.followups.length) return ["f", "يرجى المتابعة"];
+      return ["y", "جديد"];
+    }
+    return [{ p: "y", a: "g", r: "r" }[r.status], STATUS[r.status]];
+  }
+  // رسالة واتساب جاهزة للموظف (أرقام الكويت 8 خانات + 965)
+  function waLink(r, u) {
+    var st = r.status === "r" ? "مرفوض" + (r.reject_reason ? " — السبب: " + r.reject_reason : "")
+      : r.done_at ? "تمت الموافقة وتم عمل اللازم"
+      : r.followups.length ? "يرجى المتابعة: " + r.followups[r.followups.length - 1].note
+      : "تمت الموافقة وجاري التنفيذ";
+    var msg = "مرحباً " + u.full_name + "،\nبخصوص طلب " + KINDS[r.kind] + " بتاريخ " + r.date_from + (r.date_to ? " إلى " + r.date_to : "") +
+      ":\n" + st + "\n\nقسم الكهرباء والإلكترونيات - خفر السواحل";
+    return "https://wa.me/965" + encodeURIComponent(u.phone) + "?text=" + encodeURIComponent(msg);
   }
   function reqById(id) { return load().reqs.filter(function (r) { return r.id === id; })[0]; }
   function doDecide(form, submitter) {
@@ -447,8 +487,7 @@
     else if (kind === "register") doRegister(formData(f));
     else if (kind === "req") doReq(f);
     else if (kind === "decide") doDecide(f, ev.submitter);
-    else if (kind === "followup") doFollowup(f);
-    else if (kind === "done") doDone(f);
+    else if (kind === "qact") { if (ev.submitter && ev.submitter.value === "done") doDone(f); else doFollowup(f); }
     else if (kind === "filter") {
       var d = formData(f), qs = Object.keys(d).filter(function (k) { return d[k]; }).map(function (k) { return encodeURIComponent(k) + "=" + encodeURIComponent(d[k]); }).join("&");
       go(f.dataset.path + (qs ? "?" + qs : ""));

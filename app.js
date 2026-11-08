@@ -185,18 +185,56 @@
   function stamp(uid, label, at, tone, mini) {
     var u = userById(uid); if (!u) return "";
     var n = ++stampSeq, rot = ((n * 37) % 8) - 4;
-    var svg = '<svg viewBox="0 0 260 170" aria-hidden="true"><defs>' +
-      '<path id="stt' + n + '" d="M 36 85 A 94 55 0 0 1 224 85"/><path id="stb' + n + '" d="M 30 85 A 100 61 0 0 0 230 85"/></defs>' +
+    var svg = '<svg viewBox="0 0 260 170" aria-hidden="true">' +
       '<ellipse cx="130" cy="85" rx="126" ry="81" fill="none" stroke="currentColor" stroke-width="3.4"/>' +
       '<ellipse cx="130" cy="85" rx="120" ry="75" fill="none" stroke="currentColor" stroke-width="1"/>' +
       '<ellipse cx="130" cy="85" rx="88" ry="50" fill="none" stroke="currentColor" stroke-width="1.5"/>' +
-      '<text font-size="12.5" font-weight="800" text-anchor="middle"><textPath href="#stt' + n + '" startOffset="50%">الإدارة العامة لخفر السواحل</textPath></text>' +
-      '<text font-size="11.5" font-weight="700" text-anchor="middle"><textPath href="#stb' + n + '" startOffset="50%">قسم الكهرباء والإلكترونيات</textPath></text>' +
       '<text x="26" y="89" font-size="12" text-anchor="middle">★</text><text x="234" y="89" font-size="12" text-anchor="middle">★</text></svg>';
-    return '<div class="stamp' + (tone ? " " + tone : "") + (mini ? " mini" : "") + '" style="--rot:' + rot + 'deg" title="' + esc(label + " — " + nameLine(u)) + '">' + svg +
+    return '<div class="stamp' + (tone ? " " + tone : "") + (mini ? " mini" : "") + '" style="--rot:' + rot + 'deg" title="' + esc(label + " — " + nameLine(u)) + '">' + svg + '<div class="ring"></div>' +
       '<div class="sc"><em>' + esc(label) + "</em>" + (u.rank ? "<small>" + esc(u.rank) + "</small>" : "") + "<b>" + esc(u.full_name) + "</b><span>" + esc(u.job_title) + "</span>" +
       (at ? "<i>" + ymdhm(at) + "</i>" : "") + "</div></div>";
   }
+  // كلام إطار الختم: SVG textPath يقطّع الحروف العربية في Safari/الآيفون،
+  // فنكتب السطر عدل (متصل) على canvas ثم نحنيه شريحة شريحة على القوس، ونستخدمه كقناع للختم.
+  function buildRing() {
+    try {
+      var S = 4, cv = document.createElement("canvas"); cv.width = 260 * S; cv.height = 170 * S;
+      var ctx = cv.getContext("2d"); if (!ctx) return;
+      var arc = function (txt, font, rx, ry, top) {
+        var src = document.createElement("canvas"), sx = src.getContext("2d"), px = font[1] * S;
+        sx.font = font[0] + " " + px + "px Tajawal, Tahoma, sans-serif";
+        var W = Math.ceil(sx.measureText(txt).width) + 4, H = Math.ceil(px * 1.8), base = Math.round(px * 1.25);
+        src.width = W; src.height = H;
+        sx.font = font[0] + " " + px + "px Tajawal, Tahoma, sans-serif"; sx.direction = "rtl"; sx.textAlign = "center"; sx.fillStyle = "#000";
+        sx.fillText(txt, W / 2, base);
+        // جدول طول القوس: من اليسار إلى اليمين، فوق (θ من π إلى 2π) أو تحت (θ من π إلى 0)
+        var N = 720, pts = [], len = [0], cx = 130 * S, cy = 85 * S;
+        for (var i = 0; i <= N; i++) {
+          var t = Math.PI + (top ? 1 : -1) * Math.PI * i / N;
+          pts.push([cx + rx * S * Math.cos(t), cy + ry * S * Math.sin(t)]);
+          if (i) len.push(len[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+        }
+        var s0 = (len[N] - W) / 2, j = 0;
+        for (var x = 0; x < W; x++) {
+          var s = s0 + x + 0.5;
+          while (j < N - 1 && len[j + 1] < s) j++;
+          var f = (s - len[j]) / (len[j + 1] - len[j] || 1), a = pts[j], b = pts[j + 1];
+          ctx.save();
+          ctx.translate(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f);
+          ctx.rotate(Math.atan2(b[1] - a[1], b[0] - a[0]));
+          ctx.drawImage(src, x, 0, 1, H, -0.5, -base, 1.6, H);
+          ctx.restore();
+        }
+      };
+      arc("الإدارة العامة لخفر السواحل", ["800", 12.5], 94, 55, true);
+      arc("قسم الكهرباء والإلكترونيات", ["700", 11.5], 100, 61, false);
+      document.documentElement.style.setProperty("--ring", 'url("' + cv.toDataURL("image/png") + '")');
+    } catch (e) { /* يبقى الختم بدون كلام الإطار */ }
+  }
+  if (document.fonts && document.fonts.load) {
+    Promise.all([document.fonts.load("800 50px Tajawal", "الإدارة"), document.fonts.load("700 46px Tajawal", "قسم")]).then(buildRing, buildRing);
+  } else buildRing();
+
   function stamps(r) {
     var s = "";
     var proLbl = r.pro_proxy ? "عن مسئول المهنيين" : "مسئول المهنيين";

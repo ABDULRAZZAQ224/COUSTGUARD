@@ -9,6 +9,21 @@
   var KINDS = { perm: "استئذان", leave: "إجازة", emer: "إجازة طارئة (عارضة)", med: "اعتماد طبية (إجازة مرضية)", meet: "طلب مقابلة",
                 pleave: "إجازة مهنيين", pexit: "إذن مغادرة (مهنيين)" };
   var PRO_KINDS = ["pleave", "pexit"]; // تمر على مسئول المهنيين قبل رئيس القسم
+  // أقسام الطلبات: كل قسم بخانته
+  var CATS = {
+    perm: { t: "الاستئذانات", one: "استئذان", icon: "⏱️", kinds: ["perm"], d: "3 ساعات بالضبط — حد 4 بالشهر" },
+    leave: { t: "الإجازات", one: "إجازة", icon: "🏖️", kinds: ["leave", "emer"], d: "إجازة عادية أو طارئة (عارضة)" },
+    med: { t: "الطبيات", one: "طبية", icon: "🩺", kinds: ["med"], d: "اعتماد إجازة مرضية مع صورة" },
+    meet: { t: "المقابلات", one: "مقابلة", icon: "🤝", kinds: ["meet"], d: "طلب مقابلة مسؤول" },
+    pro: { t: "المهنيين", one: "مهنيين", icon: "🛠️", kinds: ["pleave", "pexit"], d: "إجازة أو إذن مغادرة للمهنيين" }
+  };
+  function catOf(kind) { for (var k in CATS) if (CATS[k].kinds.indexOf(kind) >= 0) return k; return ""; }
+  function byCat(list, c) { return c && CATS[c] ? list.filter(function (r) { return catOf(r.kind) === c; }) : list; }
+  function link(path, p) {
+    var s = Object.keys(p || {}).filter(function (k) { return p[k]; }).map(function (k) { return encodeURIComponent(k) + "=" + encodeURIComponent(p[k]); }).join("&");
+    return "#/" + path + (s ? "?" + s : "");
+  }
+  function nav(h) { if (location.hash === h) render(); else location.hash = h; }
   var STATUS = { p: "قيد المراجعة", a: "موافق", r: "مرفوض" };
   var ROLES = { e: "موظف", m: "مسئول المهنيين", h: "رئيس قسم", o: "ضابط قسم", a: "إداري", s: "مدير النظام" };
   var PERIODS = { start: "بداية الدوام", during: "أثناء الدوام", end: "نهاية الدوام" };
@@ -273,18 +288,27 @@
     pexit: ["depart_date", "date_from", "date_to"]
   };
   var OPTIONAL = ["depart_date", "date_to", "perm_period", "time_from", "time_to", "meet_with", "medical_image"];
-  var myState = { errs: {}, val: { kind: "perm" } };
+  var myState = { errs: {}, val: {} };
   function viewMy(q, u) {
-    var s = myState; myState = { errs: {}, val: { kind: "perm" } };
-    var t = new Date(), n = used(u.id, t.getFullYear(), t.getMonth()), v = s.val, e = s.errs;
-    var items = load().reqs.filter(function (r) { return r.user_id === u.id; }).sort(byCreated);
+    var s = myState; myState = { errs: {}, val: {} };
+    var t = new Date(), n = used(u.id, t.getFullYear(), t.getMonth()), v = s.val, e = s.errs, c = CATS[q.c] ? q.c : "", nw = CATS[q["new"]] ? q["new"] : "";
+    var all = load().reqs.filter(function (r) { return r.user_id === u.id; }).sort(byCreated), items = byCat(all, c);
     ROUTES.my.after = toggleKind;
-    var cnt = function (st) { return items.filter(function (r) { return r.status === st; }).length; };
-    return hello(u, [[n + " / " + LIMIT, "استئذانات هذا الشهر"], [cnt("p"), "قيد المراجعة"], [cnt("a"), "موافق"]]) +
-      '<p class="msg">استئذاناتك هذا الشهر: <b>' + n + " من " + LIMIT + "</b> (الحد الأعلى " + LIMIT + "، وأي استئذان زيادة يرفضه النظام تلقائياً). مدة الاستئذان <b>3 ساعات بالضبط</b>.</p>" +
-      "<h2>طلب جديد</h2>" +
-      '<form class="box" data-f="req">' +
-      select("kind", "نوع الطلب", KINDS, e, v.kind) +
+    setList("طلبات " + u.full_name + (c ? " — " + CATS[c].t : ""), items);
+    var cnt = function (st) { return all.filter(function (r) { return r.status === st; }).length; };
+    var head = hello(u, [[n + " / " + LIMIT, "استئذانات هذا الشهر"], [cnt("p"), "قيد المراجعة"], [cnt("a"), "موافق"]]) +
+      "<h2>طلب جديد</h2><p class=\"sub\">اختر القسم اللي تبيه:</p>" +
+      '<div class="cats">' + Object.keys(CATS).map(function (k) {
+        return '<a href="' + link("my", { "new": k, c: c }) + '"' + (k === nw ? ' class="on"' : "") + "><i>" + CATS[k].icon + "</i><b>" + CATS[k].one + "</b><small>" + CATS[k].d + "</small></a>";
+      }).join("") + "</div>";
+    var list = "<h2>طلباتي</h2>" + catBar("my", { c: c }, all) + listTools(items.length) + (items.length ? items.map(myCard).join("") : "<p>ما في طلبات بهذا القسم.</p>");
+    if (!nw) return head + list;
+    var C = CATS[nw], kind = v.kind && catOf(v.kind) === nw ? v.kind : C.kinds[0], sub = {};
+    C.kinds.forEach(function (k) { sub[k] = KINDS[k]; });
+    return head +
+      '<form class="box" data-f="req"><div class="fh"><b>' + C.icon + " طلب " + C.one + '</b><a href="' + link("my", { c: c }) + '">✕ إغلاق</a></div>' +
+      (C.kinds.length > 1 ? select("kind", "النوع", sub, e, kind) : '<input type="hidden" name="kind" id="f_kind" value="' + kind + '">') +
+      (nw === "perm" ? '<p class="msg">استئذاناتك هذا الشهر: <b>' + n + " من " + LIMIT + "</b> — مدة الاستئذان <b>3 ساعات بالضبط</b>، والزيادة عن الحد يرفضها النظام تلقائياً.</p>" : "") +
       '<p class="sub" id="pro-hint" hidden>هذا الطلب يروح أول لمسئول المهنيين للموافقة، وبعدها لرئيس القسم.</p>' +
       field("depart_date", "تاريخ المغادرة", { type: "date" }, e, v.depart_date) +
       '<div class="row">' + field("date_from", "التاريخ / من تاريخ", { type: "date", required: "" }, e, v.date_from) + field("date_to", "إلى تاريخ", { type: "date" }, e, v.date_to) + "</div>" +
@@ -295,16 +319,33 @@
       field("notes", "ملاحظات", { type: "textarea", rows: "3" }, e, v.notes) +
       field("secret", "الرقم السري لسستم جابر", { type: "password", autocomplete: "off", required: "" }, e) +
       '<p class="sub">في النسخة التجريبية اكتب أي رقم (مثلاً 1234) — لا تكتب رقمك الحقيقي.</p>' +
-      '<p><button class="p">إرسال الطلب</button></p></form>' +
-      "<h2>طلباتي</h2>" + (items.length ? items.map(function (r) {
-        var st = pill(r, "my");
-        return '<div class="card"><div class="ch"><h3>' + KINDS[r.kind] + (r.perm_period ? " (" + PERIODS[r.perm_period] + ")" : "") + '</h3><span class="pill ' + st[0] + '">' + st[1] + "</span></div>" +
-          "<p>" + dates(r) + "</p>" +
-          (r.reject_reason ? '<p class="err">سبب الرفض: ' + esc(r.reject_reason) + "</p>" : "") +
-          r.followups.map(function (f, i) { return '<p class="fu">متابعة ' + (i + 1) + ": " + esc(f.note) + " — " + esc(uname(f.by)) + "</p>"; }).join("") +
-          (r.med ? '<p><a href="#" data-act="med" data-id="' + r.id + '">صورة الطبية</a></p>' : "") +
-          stamps(r) + (r.status !== "r" && !r.done_at ? remindBox(r) : "") + "</div>";
-      }).join("") : "<p>ما عندك طلبات بعد.</p>");
+      '<p><button class="p">إرسال الطلب</button></p></form>' + list;
+  }
+  function myCard(r) {
+    var st = pill(r, "my");
+    return '<div class="card"><div class="ch"><h3>' + KINDS[r.kind] + (r.perm_period ? " (" + PERIODS[r.perm_period] + ")" : "") + "</h3>" + chr(r, st) + "</div>" +
+      "<p>" + dates(r) + "</p>" +
+      (r.reject_reason ? '<p class="err">سبب الرفض: ' + esc(r.reject_reason) + "</p>" : "") +
+      r.followups.map(function (f, i) { return '<p class="fu">متابعة ' + (i + 1) + ": " + esc(f.note) + " — " + esc(uname(f.by)) + "</p>"; }).join("") +
+      (r.med ? '<p><a href="#" data-act="med" data-id="' + r.id + '">صورة الطبية</a></p>' : "") +
+      stamps(r) + (r.status !== "r" && !r.done_at ? remindBox(r) : "") + "</div>";
+  }
+  // الحالة + زر طباعة الطلب
+  function chr(r, st) {
+    return '<div class="chr"><span class="pill ' + st[0] + '">' + st[1] + '</span><button type="button" class="pr" data-act="print-req" data-id="' + r.id + '">🖨 طباعة</button></div>';
+  }
+  // شريط الأقسام: الكل | الاستئذانات | الإجازات | ...
+  function catBar(path, p, list) {
+    var c = p.c || "";
+    var tabs = [["", "الكل", list.length]].concat(Object.keys(CATS).map(function (k) {
+      return [k, CATS[k].icon + " " + CATS[k].t, list.filter(function (r) { return catOf(r.kind) === k; }).length];
+    }));
+    return '<div class="cats-bar noprint">' + tabs.map(function (t) {
+      return '<a href="' + link(path, Object.assign({}, p, { c: t[0] })) + '"' + (t[0] === c ? ' class="on"' : "") + ">" + t[1] + " <span>" + t[2] + "</span></a>";
+    }).join("") + "</div>";
+  }
+  function listTools(n) {
+    return n ? '<div class="ltools noprint"><button type="button" class="pbtn" data-act="print-list">🖨 طباعة القائمة (' + n + ")</button></div>" : "";
   }
   // تذكير الإداري المداوم بالطلب على الواتساب
   function remindBox(r) {
@@ -334,7 +375,7 @@
     var lf = document.querySelector('label[for="f_date_from"]'); if (lf) lf.textContent = k.value === "pexit" ? "تاريخ الإجازة (من)" : "التاريخ / من تاريخ";
     var tt = document.getElementById("f_time_to"), lt = document.querySelector('label[for="f_time_to"]');
     if (tt) { tt.readOnly = k.value === "perm"; lt.textContent = k.value === "perm" ? "إلى الساعة (تلقائي: 3 ساعات)" : "إلى الساعة"; }
-    document.getElementById("pro-hint").hidden = PRO_KINDS.indexOf(k.value) < 0;
+    var ph = document.getElementById("pro-hint"); if (ph) ph.hidden = PRO_KINDS.indexOf(k.value) < 0;
     syncPermTime();
   }
   function syncPermTime() {
@@ -373,8 +414,8 @@
       }
       r.secret = d.secret;
       D.reqs.push(r);
-      if (save()) flash("ok", isPro(r) ? "تم إرسال الطلب لمسئول المهنيين" : "تم إرسال الطلب"); else D.reqs.pop();
-      render();
+      if (save()) { flash("ok", isPro(r) ? "تم إرسال الطلب لمسئول المهنيين" : "تم إرسال الطلب"); return nav(link("my", { c: catOf(r.kind) })); }
+      D.reqs.pop(); render();
     }, function () { myState = { errs: { medical_image: "تعذّر قراءة الصورة" }, val: d }; render(); });
   }
   // تصغير الصورة قبل حفظها بالمتصفح
@@ -399,8 +440,8 @@
 
   /* ---------- القوائم ---------- */
   function byCreated(a, b) { return a.created < b.created ? 1 : -1; }
-  function filterBar(path, q, f, filters) {
-    return '<form class="flt" data-f="filter" data-path="' + path + '"><input name="q" value="' + esc(q) + '" placeholder="ابحث بالاسم"><select name="f">' +
+  function filterBar(path, q, f, filters, c) {
+    return '<form class="flt" data-f="filter" data-path="' + path + '"><input type="hidden" name="c" value="' + esc(c || "") + '"><input name="q" value="' + esc(q) + '" placeholder="ابحث بالاسم"><select name="f">' +
       filters.map(function (x) { return '<option value="' + x[0] + '"' + (x[0] === f ? " selected" : "") + ">" + x[1] + "</option>"; }).join("") + "</select><button>بحث</button></form>";
   }
   function byName(list, q) { return q ? list.filter(function (r) { return uname(r.user_id).indexOf(q) >= 0; }) : list; }
@@ -420,25 +461,30 @@
     var W = function (r) { return r.status === "p" && !r.pro_by; }, OK = function (r) { return !!r.pro_by && r.status !== "r"; }, RJ = function (r) { return r.status === "r"; };
     var items = base.filter(f === "w" ? W : f === "ok" ? OK : f === "r" ? RJ : function () { return true; });
     items = byName(items, s).sort(byCreated);
+    var FL = { w: "بانتظار موافقتك", ok: "تمت موافقتك", r: "مرفوض", all: "الكل" };
+    setList("طلبات المهنيين — " + (FL[f] || "الكل") + (s ? " — بحث: " + s : ""), items);
     return hello(u, [[base.filter(W).length, "بانتظار موافقتك", "#/pro?f=w", f === "w"], [base.filter(OK).length, "تمت موافقتك", "#/pro?f=ok", f === "ok"], [base.filter(RJ).length, "مرفوض", "#/pro?f=r", f === "r"]]) +
-      filterBar("pro", s, f, [["w", "بانتظار موافقتك"], ["ok", "تمت موافقتك"], ["r", "مرفوض"], ["all", "الكل"]]) + cards(items, "pro");
+      filterBar("pro", s, f, [["w", "بانتظار موافقتك"], ["ok", "تمت موافقتك"], ["r", "مرفوض"], ["all", "الكل"]]) + listTools(items.length) + cards(items, "pro");
   }
   function viewReview(q, u) {
-    var f = q.f || "p", s = (q.q || "").trim(), all = load().reqs;
+    var f = q.f || "p", s = (q.q || "").trim(), c = CATS[q.c] ? q.c : "", all = byCat(load().reqs, c);
     var cnt = function (st) { return all.filter(function (r) { return r.status === st; }).length; };
-    var items = all.filter(function (r) { return f === "all" || r.status === f; });
+    var items = load().reqs.filter(function (r) { return f === "all" || r.status === f; });
     items = byName(items, s).sort(byCreated);
-    return hello(u, [[cnt("p"), "قيد المراجعة", "#/review?f=p", f === "p"], [cnt("a"), "موافق", "#/review?f=a", f === "a"], [cnt("r"), "مرفوض", "#/review?f=r", f === "r"]]) +
-      filterBar("review", s, f, [["p", "قيد المراجعة"], ["a", "موافق"], ["r", "مرفوض"], ["all", "الكل"]]) + cards(items, "review");
+    var shown = byCat(items, c), FL = { p: "قيد المراجعة", a: "موافق", r: "مرفوض", all: "الكل" };
+    setList((c ? CATS[c].t : "كل الطلبات") + " — " + (FL[f] || "الكل") + (s ? " — بحث: " + s : ""), shown);
+    return hello(u, [[cnt("p"), "قيد المراجعة", link("review", { f: "p", c: c }), f === "p"], [cnt("a"), "موافق", link("review", { f: "a", c: c }), f === "a"], [cnt("r"), "مرفوض", link("review", { f: "r", c: c }), f === "r"]]) +
+      filterBar("review", s, f, [["p", "قيد المراجعة"], ["a", "موافق"], ["r", "مرفوض"], ["all", "الكل"]], c) +
+      catBar("review", { f: f, q: s, c: c }, items) + listTools(shown.length) + cards(shown, "review");
   }
   function viewQueue(q, u) {
-    var f = q.f || "all", s = (q.q || "").trim();
+    var f = q.f || "all", s = (q.q || "").trim(), c = CATS[q.c] ? q.c : "";
     // الإداري ما يشوف إلا اللي قرر عليه رئيس القسم/الضابط
-    var base = load().reqs.filter(function (r) { return r.status !== "p" && !r.auto_rejected; });
+    var all0 = load().reqs.filter(function (r) { return r.status !== "p" && !r.auto_rejected; }), base = byCat(all0, c);
     var nNew = base.filter(function (r) { return !r.done_at && !r.followups.length; }).length,
         nFu = base.filter(function (r) { return !r.done_at && r.followups.length; }).length,
         nDone = base.filter(function (r) { return r.done_at; }).length;
-    var items = base.filter(function (r) {
+    var items = all0.filter(function (r) {
       if (f === "n") return !r.done_at && !r.followups.length;
       if (f === "f") return !r.done_at && r.followups.length;
       if (f === "d") return !!r.done_at;
@@ -446,16 +492,19 @@
       return true;
     });
     items = byName(items, s).sort(byCreated);
+    var shown = byCat(items, c), FL = { all: "الكل", n: "جديد بانتظار الإجراء", f: "يرجى المتابعة", d: "تم عمل اللازم", r: "مرفوض" };
+    setList((c ? CATS[c].t : "كل الطلبات") + " — " + (FL[f] || "الكل") + (s ? " — بحث: " + s : ""), shown);
     var duty = u.role === "a" ? '<div class="duty"><span>حالتك اليوم: ' + (onDuty(u) ? "🟢 <b>مداوم</b>" : "⚪ <b>غير مداوم</b>") +
       '</span><button type="button" data-act="duty">' + (onDuty(u) ? "تسجيل غير مداوم" : "تسجيل مداوم اليوم") + "</button></div>" : "";
-    return hello(u, [[nNew, "جديد بانتظار الإجراء", "#/queue?f=n", f === "n"], [nFu, "يرجى المتابعة", "#/queue?f=f", f === "f"], [nDone, "تم عمل اللازم", "#/queue?f=d", f === "d"]]) + duty +
-      filterBar("queue", s, f, [["all", "الكل"], ["n", "جديد بانتظار الإجراء"], ["f", "يرجى المتابعة"], ["d", "تم عمل اللازم"], ["r", "مرفوض"]]) + cards(items, "queue");
+    return hello(u, [[nNew, "جديد بانتظار الإجراء", link("queue", { f: "n", c: c }), f === "n"], [nFu, "يرجى المتابعة", link("queue", { f: "f", c: c }), f === "f"], [nDone, "تم عمل اللازم", link("queue", { f: "d", c: c }), f === "d"]]) + duty +
+      filterBar("queue", s, f, [["all", "الكل"], ["n", "جديد بانتظار الإجراء"], ["f", "يرجى المتابعة"], ["d", "تم عمل اللازم"], ["r", "مرفوض"]], c) +
+      catBar("queue", { f: f, q: s, c: c }, items) + listTools(shown.length) + cards(shown, "queue");
   }
   function cards(items, mode) {
     if (!items.length) return "<p>لا توجد طلبات.</p>";
     return items.map(function (r) {
       var u = userById(r.user_id) || {}, st = pill(r, mode);
-      var h = '<div class="card"><div class="ch"><h3>' + esc(u.full_name) + " — " + KINDS[r.kind] + '</h3><span class="pill ' + st[0] + '">' + st[1] + "</span></div>";
+      var h = '<div class="card"><div class="ch"><h3>' + esc(u.full_name) + " — " + KINDS[r.kind] + "</h3>" + chr(r, st) + "</div>";
       h += '<p class="sub">' + esc(u.job_title) + " — هاتف: " + esc(u.phone) + (mode === "queue" ? " — مدني: " + esc(u.civil_id) : "") + "</p>";
       h += "<p>" + (r.perm_period ? PERIODS[r.perm_period] + " — " : "") + dates(r) + "</p>";
       if (r.notes) h += "<p>" + esc(r.notes) + "</p>";
@@ -533,6 +582,70 @@
     r.done_by = me().id; r.done_at = new Date().toISOString(); r.secret = ""; // يحذف الرقم السري
     log("تم عمل اللازم", r.id); save(); render();
   }
+
+  /* ---------- الطباعة: نموذج طلب واحد أو كشف القائمة الحالية ---------- */
+  var lastList = { title: "", items: [] };
+  function setList(title, items) { lastList = { title: title, items: items.slice() }; }
+  function letterhead() {
+    return '<div class="lh"><div class="r"><b>الإدارة العامة لخفر السواحل</b><span>قسم الكهرباء والإلكترونيات</span></div><div class="c"><img src="logo.png" alt=""></div>' +
+      '<div class="l"><span>تاريخ الطباعة</span><b>' + ymd(new Date()) + "</b></div></div>";
+  }
+  function printFoot() { return '<div class="ft">نظام الطلبات الإدارية - قسم الكهرباء والإلكترونيات - للاستخدام الداخلي — طُبع ' + ymdhm(new Date().toISOString()) + " — " + CREDIT + "</div>"; }
+  function canSee(u, r) { return u.role === "e" ? r.user_id === u.id : u.role === "m" ? (r.user_id === u.id || isPro(r)) : true; }
+  function printReq(r) {
+    var u = userById(r.user_id) || {}, days = r.date_to ? Math.round((parseDate(r.date_to) - parseDate(r.date_from)) / 864e5) + 1 : 0;
+    var rows = [
+      ["نوع الطلب", KINDS[r.kind]],
+      r.perm_period && ["وقت الاستئذان", PERIODS[r.perm_period]],
+      r.depart_date && ["تاريخ المغادرة", r.depart_date],
+      [r.kind === "pexit" ? "تاريخ الإجازة" : r.date_to ? "الفترة" : "التاريخ", r.date_from + (r.date_to ? " إلى " + r.date_to : "")],
+      days && ["عدد الأيام", days + " يوم"],
+      r.time_from && ["الوقت", "من " + r.time_from + (r.time_to ? " إلى " + r.time_to : "")],
+      r.meet_with && ["المقابلة مع", r.meet_with],
+      r.notes && ["ملاحظات", r.notes],
+      ["الحالة", pill(r, "my")[1]],
+      r.reject_reason && ["سبب الرفض", r.reject_reason],
+      ["تاريخ التقديم", ymdhm(r.created)]
+    ].filter(Boolean);
+    var doc = letterhead() + '<div class="rt"><h1>نموذج طلب ' + KINDS[r.kind] + "</h1><p>رقم الطلب: " + r.id + "</p></div>" +
+      '<h3 class="sh">بيانات الموظف</h3><table class="meta"><tr><th>الاسم</th><td>' + esc(u.full_name) + "</td><th>المسمى</th><td>" + esc(u.job_title) + "</td></tr>" +
+      "<tr><th>الرقم المدني</th><td>" + esc(u.civil_id) + "</td><th>الهاتف</th><td>" + esc(u.phone) + "</td></tr></table>" +
+      '<h3 class="sh">تفاصيل الطلب</h3><table class="meta det">' + rows.map(function (x) { return "<tr><th>" + x[0] + "</th><td>" + esc(x[1]) + "</td></tr>"; }).join("") + "</table>" +
+      (r.followups.length ? '<h3 class="sh">المتابعات</h3><table><thead><tr><th>#</th><th>المطلوب</th><th>بواسطة</th><th>الوقت</th></tr></thead><tbody>' +
+        r.followups.map(function (f, i) { return "<tr><td>" + (i + 1) + "</td><td>" + esc(f.note) + "</td><td>" + esc(uname(f.by)) + "</td><td>" + ymdhm(f.at) + "</td></tr>"; }).join("") + "</tbody></table>" : "") +
+      '<h3 class="sh">الاعتمادات</h3>' + (stamps(r) || '<p class="sub">لا توجد اعتمادات بعد.</p>') +
+      (r.med ? '<h3 class="sh">مرفق: صورة الطبية</h3><img class="att" src="' + r.med + '" alt="صورة الطبية">' : "") + printFoot();
+    log("طباعة الطلب", r.id); save();
+    doPrint(doc);
+  }
+  function printList() {
+    var L = lastList;
+    var rows = L.items.map(function (r, i) {
+      var u = userById(r.user_id) || {}, ap = r.decided_by ? userById(r.decided_by) : null, dn = r.done_by ? userById(r.done_by) : null;
+      return "<tr><td>" + (i + 1) + "</td><td>" + esc(u.full_name) + "<br><small>" + esc(u.job_title) + "</small></td><td>" + KINDS[r.kind] + "</td><td>" +
+        (r.depart_date ? "مغادرة: " + r.depart_date + "<br>" : "") + r.date_from + (r.date_to ? "<br>إلى " + r.date_to : "") + "</td><td>" + (r.time_from ? r.time_from + (r.time_to ? " - " + r.time_to : "") : "—") + "</td><td>" +
+        pill(r, "my")[1] + (r.reject_reason ? "<br><small>" + esc(r.reject_reason) + "</small>" : "") + "</td><td>" +
+        (r.pro_by ? "<small>المهنيين: " + esc(uname(r.pro_by)) + "</small><br>" : "") + (ap ? esc(nameLine(ap)) : "—") + "</td><td>" +
+        (dn ? esc(dn.full_name) + "<br><small>" + ymdhm(r.done_at) + "</small>" : "—") + "</td></tr>";
+    }).join("");
+    var doc = letterhead() + '<div class="rt"><h1>كشف ' + esc(L.title) + "</h1><p>عدد الطلبات: " + L.items.length + "</p></div>" +
+      '<table class="lst"><thead><tr><th>م</th><th>الموظف</th><th>النوع</th><th>التاريخ</th><th>الوقت</th><th>الحالة</th><th>الاعتماد</th><th>التنفيذ</th></tr></thead><tbody>' +
+      (rows || '<tr><td colspan="8">لا توجد طلبات</td></tr>') + "</tbody></table>" + printFoot();
+    doPrint(doc);
+  }
+  function doPrint(html) {
+    var p = document.getElementById("print");
+    p.innerHTML = html;
+    document.body.classList.add("pmode");
+    var imgs = [].slice.call(p.querySelectorAll("img")).map(function (im) {
+      return im.complete ? Promise.resolve() : new Promise(function (ok) { im.onload = im.onerror = ok; setTimeout(ok, 1500); });
+    });
+    Promise.all(imgs).then(function () { window.print(); });
+  }
+  window.addEventListener("afterprint", function () {
+    if (!document.body.classList.contains("pmode")) return;
+    document.body.classList.remove("pmode"); document.getElementById("print").innerHTML = "";
+  });
 
   /* ---------- الإحصائيات ---------- */
   function viewStats(q, u) {
@@ -646,6 +759,8 @@
     }
     else if (act === "quick") { var u = load().users.filter(function (x) { return x.username === b.dataset.u; })[0]; if (u) { setUid(u.id); go(HOME[u.role]); } }
     else if (act === "print") window.print();
+    else if (act === "print-req") { var pr = reqById(+b.dataset.id); if (pr && u0 && canSee(u0, pr)) printReq(pr); }
+    else if (act === "print-list") printList();
     else if (act === "duty" && u0 && u0.role === "a") { u0.duty = onDuty(u0) ? "" : today(); save(); render(); }
     else if (act === "stat-ok" && u0 && "as".indexOf(u0.role) >= 0) {
       load().statOk[b.dataset.key] = { by: u0.id, at: new Date().toISOString() };

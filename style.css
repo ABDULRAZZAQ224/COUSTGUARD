@@ -191,3 +191,33 @@ button.p.g{background:#16a34a}
 /* Created by */
 .credit{text-align:center;font-size:12px;letter-spacing:.5px;color:#cbd5e1;padding:14px 16px 20px;direction:ltr}
 .credit.in{color:var(--mut);padding:8px 0 0;margin:0;font-size:11.5px}
+
+/* ===== أقسام الطلبات ===== */
+.cats{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:14px}
+.cats a{display:flex;flex-direction:column;align-items:center;gap:2px;padding:14px 8px;border-radius:12px;background:rgba(10,35,66,.85);border:1px solid rgba(255,255,255,.14);border-bottom:3px solid var(--or);color:#fff!important;text-decoration:none;text-align:center;transition:transform .15s,background .15s}
+.cats a:hover{transform:translateY(-2px)}
+.cats a.on{background:var(--or);border-color:var(--or)}
+.cats i{font-style:normal;font-size:28px;line-height:1.2}.cats b{font-size:15px}.cats small{font-size:11.5px;opacity:.85}
+.fh{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,.15);padding-bottom:8px;margin-bottom:4px}
+.fh b{font-size:17px;color:#fff}.fh a{font-size:13px;text-decoration:none}
+.cats-bar{display:flex;gap:6px;overflow-x:auto;margin:0 0 10px;padding-bottom:4px}
+.cats-bar a{white-space:nowrap;padding:6px 12px;border-radius:99px;background:rgba(10,35,66,.85);border:1px solid rgba(255,255,255,.15);color:#e2e8f0!important;text-decoration:none;font-weight:700;font-size:14px}
+.cats-bar a.on{background:var(--or);border-color:var(--or);color:#fff!important}
+.cats-bar span{display:inline-block;min-width:1.7em;text-align:center;background:rgba(255,255,255,.18);border-radius:99px;font-size:12px;padding:0 5px;margin-right:3px}
+.ltools{display:flex;justify-content:flex-end;margin:0 0 10px}
+.pbtn{background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:8px;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
+.pbtn:hover{background:rgba(255,255,255,.18)}
+.chr{display:flex;gap:6px;align-items:center;flex:none}
+.card button.pr{background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.28);border-radius:99px;padding:1px 10px;font-size:12px;font-weight:700}
+.card button.pr:hover{background:rgba(255,255,255,.2);filter:none}
+/* ===== الطباعة: نموذج طلب / كشف ===== */
+#print{display:none}
+@media print{
+  body.pmode #app,body.pmode .waves,body.pmode #modal{display:none!important}
+  body.pmode #print{display:block}
+  #print .det th{width:24%}
+  #print img.att{display:block;max-width:100%;max-height:320px;margin:0 auto;border:1px solid #cbd5e1}
+  #print .stamps{justify-content:center;gap:4px 26px}
+  #print table.lst td,#print table.lst th{font-size:9.5pt;padding:5px;vertical-align:top}
+  #print table.lst small{color:#475569;font-size:8.5pt}
+}

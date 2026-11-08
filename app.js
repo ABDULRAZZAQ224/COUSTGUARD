@@ -153,19 +153,31 @@
   }
 
   /* ---------- الختم: اسم الشخص ومسماه ---------- */
-  function stamp(uid, label, at, red) {
+  // ختم رسمي بيضاوي: اسم الجهة على الإطار، وبالوسط نوع الإجراء + الرتبة + الاسم + المسمى + التاريخ
+  var stampSeq = 0;
+  function stamp(uid, label, at, tone, mini) {
     var u = userById(uid); if (!u) return "";
-    return '<div class="stamp' + (red ? " red" : "") + '"><small>' + esc(label) + "</small><b>" + esc(nameLine(u)) + "</b><span>" + esc(u.job_title) + "</span>" +
-      (at ? "<i>" + ymdhm(at) + "</i>" : "") + "</div>";
+    var n = ++stampSeq, rot = ((n * 37) % 8) - 4;
+    var svg = '<svg viewBox="0 0 260 170" aria-hidden="true"><defs>' +
+      '<path id="stt' + n + '" d="M 36 85 A 94 55 0 0 1 224 85"/><path id="stb' + n + '" d="M 30 85 A 100 61 0 0 0 230 85"/></defs>' +
+      '<ellipse cx="130" cy="85" rx="126" ry="81" fill="none" stroke="currentColor" stroke-width="3.4"/>' +
+      '<ellipse cx="130" cy="85" rx="120" ry="75" fill="none" stroke="currentColor" stroke-width="1"/>' +
+      '<ellipse cx="130" cy="85" rx="88" ry="50" fill="none" stroke="currentColor" stroke-width="1.5"/>' +
+      '<text font-size="12.5" font-weight="800" text-anchor="middle"><textPath href="#stt' + n + '" startOffset="50%">الإدارة العامة لخفر السواحل</textPath></text>' +
+      '<text font-size="11.5" font-weight="700" text-anchor="middle"><textPath href="#stb' + n + '" startOffset="50%">قسم الكهرباء والإلكترونيات</textPath></text>' +
+      '<text x="26" y="89" font-size="12" text-anchor="middle">★</text><text x="234" y="89" font-size="12" text-anchor="middle">★</text></svg>';
+    return '<div class="stamp' + (tone ? " " + tone : "") + (mini ? " mini" : "") + '" style="--rot:' + rot + 'deg" title="' + esc(label + " — " + nameLine(u)) + '">' + svg +
+      '<div class="sc"><em>' + esc(label) + "</em>" + (u.rank ? "<small>" + esc(u.rank) + "</small>" : "") + "<b>" + esc(u.full_name) + "</b><span>" + esc(u.job_title) + "</span>" +
+      (at ? "<i>" + ymdhm(at) + "</i>" : "") + "</div></div>";
   }
   function stamps(r) {
     var s = "";
     if (r.pro_by) s += stamp(r.pro_by, "موافقة مسئول المهنيين", r.pro_at);
     if (r.decided_by) {
       var rej = r.status === "r", byPro = rej && isPro(r) && !r.pro_by; // رفض من مسئول المهنيين نفسه
-      s += stamp(r.decided_by, rej ? (byPro ? "رفض مسئول المهنيين" : "رفض") : "موافقة", r.decided_at, rej);
+      s += stamp(r.decided_by, rej ? (byPro ? "رفض مسئول المهنيين" : "مرفوض") : "موافقة", r.decided_at, rej ? "red" : "");
     }
-    if (r.done_by) s += stamp(r.done_by, "تم عمل اللازم", r.done_at);
+    if (r.done_by) s += stamp(r.done_by, "تم عمل اللازم", r.done_at, "green");
     return s ? '<div class="stamps">' + s + "</div>" : "";
   }
 
@@ -574,7 +586,7 @@
       '<h3 class="sh">3. تفصيل حسب الموظف</h3><div class="tw"><table><thead><tr><th>الموظف</th><th>الاستئذانات (الحد ' + LIMIT + "/شهر)</th><th>الإجازات</th><th>أيام الإجازات</th><th>المرفوض</th></tr></thead><tbody>" +
       (eRows || '<tr><td colspan="5">لا توجد بيانات</td></tr>') + "</tbody></table></div>" +
       '<div class="sig"><div><span>رئيس القسم</span><i></i><p>' + (head ? esc(nameLine(head)) : "&nbsp;") + "</p></div>" +
-      "<div><span>الاعتماد</span>" + (ok ? stamp(ok.by, "اعتماد الإحصائية", ok.at) : "<i></i><p>&nbsp;</p>") + "</div></div>" +
+      "<div><span>الاعتماد</span>" + (ok ? '<div class="stamps c">' + stamp(ok.by, "اعتماد الإحصائية", ok.at) + "</div>" : "<i></i><p>&nbsp;</p>") + "</div></div>" +
       '<div class="ft">تقرير آلي من نظام الطلبات الإدارية - قسم الكهرباء والإلكترونيات - للاستخدام الداخلي — ' + CREDIT + "</div>";
   }
 
@@ -586,7 +598,7 @@
       '<div class="tw"><table class="ut"><thead><tr><th>المستخدم</th><th>الاسم</th><th>الرتبة</th><th>المسمى</th><th>الصلاحية</th><th>الختم</th></tr></thead><tbody>' +
       D.users.map(function (u) {
         var cell = u.role === "s" ? ROLES.s : '<select data-role="' + u.id + '">' + Object.keys(opts).map(function (k) { return '<option value="' + k + '"' + (k === u.role ? " selected" : "") + ">" + opts[k] + "</option>"; }).join("") + "</select>";
-        return "<tr><td>" + esc(u.username) + "</td><td>" + inp(u, "full_name", "الاسم") + "</td><td>" + inp(u, "rank", "مثال: مقدم مهندس بحري") + "</td><td>" + inp(u, "job_title", "المسمى") + "</td><td>" + cell + "</td><td>" + stamp(u.id, ROLES[u.role]) + "</td></tr>";
+        return "<tr><td>" + esc(u.username) + "</td><td>" + inp(u, "full_name", "الاسم") + "</td><td>" + inp(u, "rank", "مثال: مقدم مهندس بحري") + "</td><td>" + inp(u, "job_title", "المسمى") + "</td><td>" + cell + '</td><td><div class="stamps c">' + stamp(u.id, ROLES[u.role], null, "", true) + "</div></td></tr>";
       }).join("") + "</tbody></table></div>" +
       '<h2>سجل العمليات</h2><div class="tw"><table><thead><tr><th>الوقت</th><th>المستخدم</th><th>العملية</th><th>الهدف</th></tr></thead><tbody>' +
       (D.audit.length ? D.audit.slice(0, 50).map(function (a) { return "<tr><td>" + ymdhm(a.at) + "</td><td>" + esc(uname(a.who)) + "</td><td>" + esc(a.action) + "</td><td>" + esc(a.target) + "</td></tr>"; }).join("")

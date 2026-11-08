@@ -187,10 +187,11 @@
   }
   function stamps(r) {
     var s = "";
-    if (r.pro_by) s += stamp(r.pro_by, "موافقة مسئول المهنيين", r.pro_at);
+    var proLbl = r.pro_proxy ? "عن مسئول المهنيين" : "مسئول المهنيين";
+    if (r.pro_by) s += stamp(r.pro_by, "موافقة " + proLbl, r.pro_at);
     if (r.decided_by) {
-      var rej = r.status === "r", byPro = rej && isPro(r) && !r.pro_by; // رفض من مسئول المهنيين نفسه
-      s += stamp(r.decided_by, rej ? (byPro ? "رفض مسئول المهنيين" : "مرفوض") : "موافقة", r.decided_at, rej ? "red" : "");
+      var rej = r.status === "r", byPro = rej && isPro(r) && !r.pro_by; // رفض من مسئول المهنيين (أو مدير النظام عنه)
+      s += stamp(r.decided_by, rej ? (byPro ? "رفض " + proLbl : "مرفوض") : "موافقة", r.decided_at, rej ? "red" : "");
     }
     if (r.done_by) s += stamp(r.done_by, "تم عمل اللازم", r.done_at, "green");
     return s ? '<div class="stamps">' + s + "</div>" : "";
@@ -512,11 +513,15 @@
       if (r.reject_reason) h += '<p class="err">السبب: ' + esc(r.reject_reason) + "</p>";
       h += r.followups.map(function (x, i) { return '<p class="fu">متابعة ' + (i + 1) + ": " + esc(x.note) + " — " + esc(uname(x.by)) + " — " + ymdhm(x.at) + "</p>"; }).join("");
       h += stamps(r);
-      if (mode === "pro" && r.status === "p" && !r.pro_by) {
-        h += '<form class="acts" data-f="pro" data-id="' + r.id + '"><input name="reason" placeholder="سبب الرفض (إجباري عند الرفض)"><button class="g" name="do" value="a">موافقة مسئول المهنيين</button><button class="r" name="do" value="r">رفض</button></form>';
+      var isAdm = (me() || {}).role === "s";
+      if ((mode === "pro" || (mode === "review" && isAdm)) && r.status === "p" && isPro(r) && !r.pro_by) {
+        // مدير النظام يقدر يوقّع عن مسئول المهنيين بختمه هو
+        h += (isAdm ? '<p class="wait">✍️ توقيعك هنا يكون عن مسئول المهنيين (بختمك)</p>' : "") +
+          '<form class="acts" data-f="pro" data-id="' + r.id + '"><input name="reason" placeholder="سبب الرفض (إجباري عند الرفض)"><button class="g" name="do" value="a">' +
+          (isAdm ? "موافقة عن مسئول المهنيين" : "موافقة مسئول المهنيين") + '</button><button class="r" name="do" value="r">رفض</button></form>';
       }
       if (mode === "review" && r.status === "p") {
-        if (isPro(r) && !r.pro_by) h += '<p class="wait">⏳ بانتظار موافقة مسئول المهنيين أولاً</p>';
+        if (isPro(r) && !r.pro_by) h += isAdm ? "" : '<p class="wait">⏳ بانتظار موافقة مسئول المهنيين أولاً</p>';
         else h += '<form class="acts" data-f="decide" data-id="' + r.id + '"><input name="reason" placeholder="سبب الرفض (إجباري عند الرفض)"><button class="g" name="do" value="a">موافقة</button><button class="r" name="do" value="r">رفض</button></form>';
       }
       if (mode === "queue" && !r.done_at) {
@@ -554,10 +559,13 @@
   function reqById(id) { return load().reqs.filter(function (r) { return r.id === id; })[0]; }
   function doPro(form, submitter) {
     var r = reqById(+form.dataset.id), why = form.reason.value.trim(), act = submitter && submitter.value, now = new Date().toISOString();
-    if (!r || r.status !== "p" || r.pro_by || !isPro(r)) return render();
+    var who = me();
+    if (!r || !who || "ms".indexOf(who.role) < 0 || r.status !== "p" || r.pro_by || !isPro(r)) return render();
     if (act === "r" && !why) { flash("err", "لازم تكتب سبب الرفض"); return render(); }
-    if (act === "a") { r.pro_by = me().id; r.pro_at = now; log("موافقة مسئول المهنيين", r.id); flash("ok", "تمت الموافقة، والطلب الحين عند رئيس القسم"); }
-    else { r.status = "r"; r.reject_reason = why; r.decided_by = me().id; r.decided_at = now; log("رفض مسئول المهنيين", r.id); }
+    r.pro_proxy = who.role !== "m"; // توقيع مدير النظام عن مسئول المهنيين
+    var tag = r.pro_proxy ? " (عن مسئول المهنيين)" : "";
+    if (act === "a") { r.pro_by = who.id; r.pro_at = now; log("موافقة مسئول المهنيين" + tag, r.id); flash("ok", "تمت الموافقة" + tag + "، والطلب الحين عند رئيس القسم"); }
+    else { r.status = "r"; r.reject_reason = why; r.decided_by = who.id; r.decided_at = now; log("رفض مسئول المهنيين" + tag, r.id); }
     save(); render();
   }
   function doDecide(form, submitter) {

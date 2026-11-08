@@ -56,7 +56,7 @@
     return n > LATE_DAYS ? n : 0;
   }
   function lateOf(r) { return lateBy(r.kind, r.date_from, r.created); }
-  function lateMsg(n) { return "⚠️ تأخير في الإرسال: الطلب انرسل بعد " + n + " أيام من تاريخه — احتمال رفض الطلب بسبب التأخير"; }
+  function lateMsg(n) { return "⚠️ متأخر على تاريخ الطلب " + n + " أيام — في احتمال ينرفض بسبب تأخير في إرسال الطلب"; }
   function lateBox(r) { var n = lateOf(r); return n ? '<p class="late">' + lateMsg(n) + "</p>" : ""; }
 
   /* ---------- التخزين ---------- */
@@ -396,7 +396,8 @@
     var k = document.getElementById("f_kind"), df = document.getElementById("f_date_from"), lh = document.getElementById("late-hint");
     if (!k || !df || !lh) return;
     var n = lateBy(k.value, df.value);
-    lh.hidden = !n; lh.textContent = n ? "⚠️ فات على تاريخ الطلب " + n + " أيام — تقدر ترسله ويوصل عادي، بس فيه احتمال رفض بسبب التأخير في الإرسال" : "";
+    lh.hidden = !n; lh.textContent = n ? "⚠️ متأخر على تاريخ الطلب " + n + " أيام — تقدر تدزه ويوصل " + (PRO_KINDS.indexOf(k.value) >= 0 ? "لمسئول المهنيين ورئيس القسم" : "لرئيس القسم") +
+      "، ولكن في احتمال ينرفض بسبب تأخير في إرسال الطلب" : "";
   }
   function syncPermTime() {
     var k = document.getElementById("f_kind"), tf = document.getElementById("f_time_from"), tt = document.getElementById("f_time_to");

@@ -6,6 +6,8 @@
   var KEY = "khafr_demo_v2";
   var LIMIT = 4;          // الحد الأعلى للاستئذانات بالشهر
   var PERM_MIN = 180;     // الاستئذان 3 ساعات بالضبط
+  var LATE_DAYS = 2;      // بعد يومين من تاريخ الطلب: يوصل بس مع تنبيه احتمال الرفض
+  var LATE_KINDS = ["perm", "leave", "emer", "med", "pleave"];
   var KINDS = { perm: "استئذان", leave: "إجازة", emer: "إجازة طارئة (عارضة)", med: "اعتماد طبية (إجازة مرضية)", meet: "طلب مقابلة",
                 pleave: "إجازة مهنيين", pexit: "إذن مغادرة (مهنيين)" };
   var PRO_KINDS = ["pleave", "pexit"]; // تمر على مسئول المهنيين قبل رئيس القسم
@@ -47,6 +49,15 @@
   function toMin(t) { var p = t.split(":"); return +p[0] * 60 + +p[1]; }
   function fromMin(m) { return pad(Math.floor(m / 60)) + ":" + pad(m % 60); }
   function isPro(r) { return PRO_KINDS.indexOf(r.kind) >= 0; }
+  // كم يوم تأخر الموظف في إرسال الطلب بعد تاريخه (0 = ما تأخر)
+  function lateBy(kind, dateFrom, sentAt) {
+    if (LATE_KINDS.indexOf(kind) < 0 || !dateFrom) return 0;
+    var s = new Date(sentAt || Date.now()), n = Math.round((new Date(s.getFullYear(), s.getMonth(), s.getDate()) - parseDate(dateFrom)) / 864e5);
+    return n > LATE_DAYS ? n : 0;
+  }
+  function lateOf(r) { return lateBy(r.kind, r.date_from, r.created); }
+  function lateMsg(n) { return "⚠️ تأخير في الإرسال: الطلب انرسل بعد " + n + " أيام من تاريخه — احتمال رفض الطلب بسبب التأخير"; }
+  function lateBox(r) { var n = lateOf(r); return n ? '<p class="late">' + lateMsg(n) + "</p>" : ""; }
 
   /* ---------- التخزين ---------- */
   var db = null, memUid = null;
@@ -88,9 +99,10 @@
       R({ id: 6, user_id: 6, kind: "perm", date_from: d(-9), time_from: "11:00", time_to: "14:00", perm_period: "end", status: "r", decided_by: 2, decided_at: at(-9), reject_reason: "ضغط عمل في القسم ذلك اليوم", created: at(-10) }),
       R({ id: 7, user_id: 5, kind: "leave", date_from: d(-70), date_to: d(-63), status: "a", decided_by: 3, decided_at: at(-75), done_by: 4, done_at: at(-74), created: at(-76) }),
       R({ id: 8, user_id: 9, kind: "pleave", date_from: d(5), date_to: d(9), secret: "4321", created: at(0, 9) }),
-      R({ id: 9, user_id: 9, kind: "pexit", depart_date: d(14), date_from: d(14), date_to: d(28), notes: "سفر خارج البلاد", secret: "4321", pro_by: 7, pro_at: at(-1, 12), created: at(-2, 10) })
+      R({ id: 9, user_id: 9, kind: "pexit", depart_date: d(14), date_from: d(14), date_to: d(28), notes: "سفر خارج البلاد", secret: "4321", pro_by: 7, pro_at: at(-1, 12), created: at(-2, 10) }),
+      R({ id: 10, user_id: 6, kind: "emer", date_from: d(-6), date_to: d(-5), notes: "ظرف عائلي", secret: "5678", created: at(0, 7) })
     ];
-    return { users: u, reqs: reqs, audit: [], statOk: {}, seq: { u: 10, r: 10 }, seeded: now };
+    return { users: u, reqs: reqs, audit: [], statOk: {}, seq: { u: 10, r: 11 }, seeded: now };
   }
   function load() {
     if (db) return db;
@@ -313,6 +325,7 @@
       '<p class="sub" id="pro-hint" hidden>هذا الطلب يروح أول لمسئول المهنيين للموافقة، وبعدها لرئيس القسم.</p>' +
       field("depart_date", "تاريخ المغادرة", { type: "date" }, e, v.depart_date) +
       '<div class="row">' + field("date_from", "التاريخ / من تاريخ", { type: "date", required: "" }, e, v.date_from) + field("date_to", "إلى تاريخ", { type: "date" }, e, v.date_to) + "</div>" +
+      '<p class="late" id="late-hint" hidden></p>' +
       select("perm_period", "وقت الاستئذان", PERIODS, e, v.perm_period, true) +
       '<div class="row">' + field("time_from", "من الساعة", { type: "time" }, e, v.time_from) + field("time_to", "إلى الساعة", { type: "time" }, e, v.time_to) + "</div>" +
       field("meet_with", "المقابلة مع", { maxlength: "60" }, e, v.meet_with) +
@@ -325,7 +338,7 @@
   function myCard(r) {
     var st = pill(r, "my");
     return '<div class="card"><div class="ch"><h3>' + KINDS[r.kind] + (r.perm_period ? " (" + PERIODS[r.perm_period] + ")" : "") + "</h3>" + chr(r, st) + "</div>" +
-      "<p>" + dates(r) + "</p>" +
+      "<p>" + dates(r) + "</p>" + lateBox(r) +
       (r.reject_reason ? '<p class="err">سبب الرفض: ' + esc(r.reject_reason) + "</p>" : "") +
       r.followups.map(function (f, i) { return '<p class="fu">متابعة ' + (i + 1) + ": " + esc(f.note) + " — " + esc(uname(f.by)) + "</p>"; }).join("") +
       (r.med ? '<p><a href="#" data-act="med" data-id="' + r.id + '">صورة الطبية</a></p>' : "") +
@@ -377,7 +390,13 @@
     var tt = document.getElementById("f_time_to"), lt = document.querySelector('label[for="f_time_to"]');
     if (tt) { tt.readOnly = k.value === "perm"; lt.textContent = k.value === "perm" ? "إلى الساعة (تلقائي: 3 ساعات)" : "إلى الساعة"; }
     var ph = document.getElementById("pro-hint"); if (ph) ph.hidden = PRO_KINDS.indexOf(k.value) < 0;
-    syncPermTime();
+    syncPermTime(); syncLate();
+  }
+  function syncLate() {
+    var k = document.getElementById("f_kind"), df = document.getElementById("f_date_from"), lh = document.getElementById("late-hint");
+    if (!k || !df || !lh) return;
+    var n = lateBy(k.value, df.value);
+    lh.hidden = !n; lh.textContent = n ? "⚠️ فات على تاريخ الطلب " + n + " أيام — تقدر ترسله ويوصل عادي، بس فيه احتمال رفض بسبب التأخير في الإرسال" : "";
   }
   function syncPermTime() {
     var k = document.getElementById("f_kind"), tf = document.getElementById("f_time_from"), tt = document.getElementById("f_time_to");
@@ -415,7 +434,11 @@
       }
       r.secret = d.secret;
       D.reqs.push(r);
-      if (save()) { flash("ok", isPro(r) ? "تم إرسال الطلب لمسئول المهنيين" : "تم إرسال الطلب"); return nav(link("my", { c: catOf(r.kind) })); }
+      if (save()) {
+        var lt = lateOf(r), okm = isPro(r) ? "تم إرسال الطلب لمسئول المهنيين" : "تم إرسال الطلب";
+        if (lt) { log("طلب متأخر " + lt + " أيام", r.id); flash("err", okm + " — " + lateMsg(lt)); } else flash("ok", okm);
+        return nav(link("my", { c: catOf(r.kind) }));
+      }
       D.reqs.pop(); render();
     }, function () { myState = { errs: { medical_image: "تعذّر قراءة الصورة" }, val: d }; render(); });
   }
@@ -507,7 +530,7 @@
       var u = userById(r.user_id) || {}, st = pill(r, mode);
       var h = '<div class="card"><div class="ch"><h3>' + esc(u.full_name) + " — " + KINDS[r.kind] + "</h3>" + chr(r, st) + "</div>";
       h += '<p class="sub">' + esc(u.job_title) + " — هاتف: " + esc(u.phone) + (mode === "queue" ? " — مدني: " + esc(u.civil_id) : "") + "</p>";
-      h += "<p>" + (r.perm_period ? PERIODS[r.perm_period] + " — " : "") + dates(r) + "</p>";
+      h += "<p>" + (r.perm_period ? PERIODS[r.perm_period] + " — " : "") + dates(r) + "</p>" + lateBox(r);
       if (r.notes) h += "<p>" + esc(r.notes) + "</p>";
       if (r.med) h += '<p><a href="#" data-act="med" data-id="' + r.id + '">صورة الطبية</a></p>';
       if (r.reject_reason) h += '<p class="err">السبب: ' + esc(r.reject_reason) + "</p>";
@@ -613,7 +636,8 @@
       r.notes && ["ملاحظات", r.notes],
       ["الحالة", pill(r, "my")[1]],
       r.reject_reason && ["سبب الرفض", r.reject_reason],
-      ["تاريخ التقديم", ymdhm(r.created)]
+      ["تاريخ التقديم", ymdhm(r.created)],
+      lateOf(r) && ["تنبيه", "تأخير في الإرسال " + lateOf(r) + " أيام بعد تاريخ الطلب — احتمال رفض بسبب التأخير"]
     ].filter(Boolean);
     var doc = letterhead() + '<div class="rt"><h1>نموذج طلب ' + KINDS[r.kind] + "</h1><p>رقم الطلب: " + r.id + "</p></div>" +
       '<h3 class="sh">بيانات الموظف</h3><table class="meta"><tr><th>الاسم</th><td>' + esc(u.full_name) + "</td><th>المسمى</th><td>" + esc(u.job_title) + "</td></tr>" +
@@ -631,7 +655,7 @@
     var rows = L.items.map(function (r, i) {
       var u = userById(r.user_id) || {}, ap = r.decided_by ? userById(r.decided_by) : null, dn = r.done_by ? userById(r.done_by) : null;
       return "<tr><td>" + (i + 1) + "</td><td>" + esc(u.full_name) + "<br><small>" + esc(u.job_title) + "</small></td><td>" + KINDS[r.kind] + "</td><td>" +
-        (r.depart_date ? "مغادرة: " + r.depart_date + "<br>" : "") + r.date_from + (r.date_to ? "<br>إلى " + r.date_to : "") + "</td><td>" + (r.time_from ? r.time_from + (r.time_to ? " - " + r.time_to : "") : "—") + "</td><td>" +
+        (r.depart_date ? "مغادرة: " + r.depart_date + "<br>" : "") + r.date_from + (r.date_to ? "<br>إلى " + r.date_to : "") + (lateOf(r) ? '<br><small class="lt">⚠️ متأخر ' + lateOf(r) + " أيام</small>" : "") + "</td><td>" + (r.time_from ? r.time_from + (r.time_to ? " - " + r.time_to : "") : "—") + "</td><td>" +
         pill(r, "my")[1] + (r.reject_reason ? "<br><small>" + esc(r.reject_reason) + "</small>" : "") + "</td><td>" +
         (r.pro_by ? "<small>المهنيين: " + esc(uname(r.pro_by)) + "</small><br>" : "") + (ap ? esc(nameLine(ap)) : "—") + "</td><td>" +
         (dn ? esc(dn.full_name) + "<br><small>" + ymdhm(r.done_at) + "</small>" : "—") + "</td></tr>";
@@ -742,11 +766,12 @@
       go(f.dataset.path + (qs ? "?" + qs : ""));
     }
   });
-  app.addEventListener("input", function (ev) { if (ev.target.id === "f_time_from") syncPermTime(); });
+  app.addEventListener("input", function (ev) { if (ev.target.id === "f_time_from") syncPermTime(); if (ev.target.id === "f_date_from") syncLate(); });
   app.addEventListener("change", function (ev) {
     var t = ev.target;
     if (t.id === "f_kind") toggleKind();
     if (t.id === "f_time_from") syncPermTime();
+    if (t.id === "f_date_from") syncLate();
     if (t.dataset.role) { var u = userById(+t.dataset.role); if (u && u.role !== "s") { u.role = t.value; save(); flash("ok", "تم تحديث صلاحية " + u.full_name); render(); } }
     if (t.dataset.uf) {
       var u2 = userById(+t.dataset.uid), v = t.value.trim();

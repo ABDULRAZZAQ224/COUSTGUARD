@@ -221,7 +221,7 @@
     pro: { roles: "ms", view: viewPro },
     review: { roles: "hos", view: viewReview },
     queue: { roles: "as", view: viewQueue },
-    stats: { roles: "hoas", view: viewStats },
+    stats: { roles: "mhoas", view: viewStats },
     users: { roles: "s", view: viewUsers }
   };
   function parseHash() {
@@ -266,7 +266,7 @@
       "⚠️ Demo version — data is stored in this browser only. Do not enter real secret numbers or personal data.") +
       '</span><button type="button" data-act="reset">' + L("إعادة ضبط البيانات التجريبية", "Reset demo data") + "</button></div>";
     var links = [["my", L("طلباتي", "My requests"), "emhoas"], ["pro", L("اعتماد المهنيين", "Professionals approval"), "ms"],
-      ["review", L("الطلبات المتأخرة", "Late requests"), "hos"], ["queue", L("اعتماد وتنفيذ الطلبات", "Approve & execute"), "as"], ["stats", L("الإحصائيات", "Statistics"), "hoas"]];
+      ["review", L("الطلبات المتأخرة", "Late requests"), "hos"], ["queue", L("اعتماد وتنفيذ الطلبات", "Approve & execute"), "as"], ["stats", L("الإحصائيات", "Statistics"), "mhoas"]];
     h += '<nav class="nav noprint">' + links.filter(function (l) { return l[2].indexOf(u.role) >= 0; }).map(function (l) {
       return '<a href="#/' + l[0] + '"' + (l[0] === path ? ' class="on"' : "") + ">" + l[1] + "</a>";
     }).join("") + "</nav>";
@@ -901,11 +901,11 @@
     var eRows = Object.keys(emp).sort(function (a, b) { return a.localeCompare(b, "ar"); }).map(function (n) { var e = emp[n]; return "<tr><td>" + esc(n) + "</td><td>" + e.perm + "</td><td>" + e.leave + "</td><td>" + e.days + "</td><td>" + e.rej + "</td></tr>"; }).join("");
     var nowS = ymd(now) + " " + pad(now.getHours()) + ":" + pad(now.getMinutes());
     // الاعتماد = الإداري اللي صدّر الإحصائية (زر اعتماد)
-    var key = p + "|" + s + "|" + ymd(since), ok = D.statOk[key], canOk = "as".indexOf(u.role) >= 0;
+    var key = p + "|" + s + "|" + ymd(since), ok = D.statOk[key], canOk = "ams".indexOf(u.role) >= 0;
     var head = D.users.filter(function (x) { return x.role === "h"; })[0];
     var okBar = ok ? '<p class="msg ok noprint">✔ ' + L("الإحصائية معتمدة من ", "Statistics approved by ") + esc(nameLine(userById(ok.by) || {})) + " — " + ymdhm(ok.at) + "</p>"
       : canOk ? '<p class="noprint"><button class="p g" type="button" data-act="stat-ok" data-key="' + esc(key) + '">' + L("اعتماد الإحصائية", "Approve statistics") + '</button> <small class="sub">' + L("(يظهر ختمك في خانة الاعتماد)", "(your stamp appears in the approval box)") + "</small></p>"
-      : '<p class="msg noprint">' + L("الإحصائية غير معتمدة بعد — الاعتماد من الإداري.", "Not approved yet — approval is by the administrative clerk.") + "</p>";
+      : '<p class="msg noprint">' + L("الإحصائية غير معتمدة بعد — الاعتماد من الإداري أو مسؤول المهنيين.", "Not approved yet — approval is by the administrative clerk or the Professionals Officer.") + "</p>";
     return '<form class="flt noprint" data-f="filter" data-path="stats"><input name="q" value="' + esc(s) + '" placeholder="' + L("ابحث باسم الموظف", "Search by employee name") + '"><select name="p">' +
       Object.keys(PER).map(function (k) { return '<option value="' + k + '"' + (k === p ? " selected" : "") + ">" + T(PER[k]) + "</option>"; }).join("") + "</select><button>" + L("عرض", "Show") + "</button></form>" +
       okBar +
@@ -1011,7 +1011,7 @@
     else if (act === "print-list") printList();
     else if (act === "open-req") { var orq = reqById(+b.dataset.id); if (orq && u0 && canSee(u0, orq)) openReq(orq); }
     else if (act === "duty" && u0 && u0.role === "a") { u0.duty = onDuty(u0) ? "" : today(); save(); render(); }
-    else if (act === "stat-ok" && u0 && "as".indexOf(u0.role) >= 0) {
+    else if (act === "stat-ok" && u0 && "ams".indexOf(u0.role) >= 0) {
       load().statOk[b.dataset.key] = { by: u0.id, at: new Date().toISOString() };
       log("stat", null, T(PER[b.dataset.key.split("|")[0]] || ["", ""])); save(); flash("ok", L("تم اعتماد الإحصائية", "Statistics approved")); render();
     }

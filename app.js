@@ -11,7 +11,7 @@
 
   var LIMIT = 4;          // الحد الأعلى للاستئذانات بالشهر
   var PERM_MIN = 180;     // الاستئذان 3 ساعات بالضبط
-  var LATE_DAYS = 2;      // بعد يومين من تاريخ الطلب: يوصل لكن يعتمده ضابط/رئيس القسم مع تنبيه احتمال الرفض
+  var LATE_DAYS = 2;      // بعد يومين من تاريخ الطلب: يوصل عادي للإداري مع تنبيه احتمال الرفض
   var LATE_KINDS = ["perm", "leave", "emer", "med", "pleave"];
   var LEAVE_KINDS = ["leave", "emer", "pleave", "pexit"]; // تنبيه الحضور للقسم بعد الإجازة
   var PRO_KINDS = ["pleave", "pexit"];                     // يعتمدها مسؤول المهنيين
@@ -77,14 +77,14 @@
   }
   function lateOf(r) { return lateBy(r.kind, r.date_from, r.created); }
   function lateCard(n) {
-    return L("⚠️ تنبيه: قُدِّم هذا الطلب بعد مضيّ " + daysTxt(n) + " على تاريخه، ويُحال إلى ضابط القسم أو رئيس القسم لاعتماده، وقد يتعرّض للرفض بسبب التأخر في تقديمه.",
-      "⚠️ Notice: this request was submitted " + daysTxt(n) + " after its date. It is referred to the Section Officer or Head of Department for approval and may be rejected due to late submission.");
+    return L("⚠️ تنبيه: قُدِّم هذا الطلب بعد مضيّ " + daysTxt(n) + " على تاريخه، وقد يتعرّض للرفض بسبب التأخر في تقديمه.",
+      "⚠️ Notice: this request was submitted " + daysTxt(n) + " after its date and may be rejected due to late submission.");
   }
   function lateForm(n, pro) {
-    return L("⚠️ تنبيه: مضى على تاريخ الطلب " + daysTxt(n) + ". يمكنك إرسال الطلب وسيصل إلى " + (pro ? "مسؤول المهنيين ثم إلى " : "") +
-      "ضابط القسم أو رئيس القسم للاعتماد، إلا أنه قد يتعرّض للرفض بسبب التأخر في تقديمه.",
-      "⚠️ Notice: " + daysTxt(n) + " have passed since the request date. You may still submit it and it will reach " + (pro ? "the Professionals Officer, then " : "") +
-      "the Section Officer or Head of Department for approval; however, it may be rejected due to late submission.");
+    return L("⚠️ تنبيه: مضى على تاريخ الطلب " + daysTxt(n) + ". يمكنك إرسال الطلب وسيصل إلى " + (pro ? "مسؤول المهنيين" : "الإداري") +
+      " للاعتماد، إلا أنه قد يتعرّض للرفض بسبب التأخر في تقديمه.",
+      "⚠️ Notice: " + daysTxt(n) + " have passed since the request date. You may still submit it and it will reach " + (pro ? "the Professionals Officer" : "the administrative clerk") +
+      " for approval; however, it may be rejected due to late submission.");
   }
   function lateBox(r) { var n = lateOf(r); return n ? '<p class="late">' + lateCard(n) + "</p>" : ""; }
   function leaveNote() {
@@ -94,15 +94,15 @@
   function leaveBox(r) { return LEAVE_KINDS.indexOf(r.kind) >= 0 && r.status !== "r" ? '<p class="note-l">' + leaveNote() + "</p>" : ""; }
 
   /* ---------- مراحل الطلب: من يعتمده؟ ----------
-     مهنيين ← مسؤول المهنيين | طلب متأخر (أكثر من يومين) ← ضابط القسم أو رئيس القسم | غير ذلك ← الإداري
+     مهنيين ← مسؤول المهنيين | غير ذلك (حتى المتأخر) ← الإداري. رئيس القسم وضابط القسم للاطلاع فقط
      بعد الاعتماد ← الإداري للتنفيذ. مدير النظام يقدر على كل المراحل. */
   function stage(r) {
     if (r.status === "r") return "rej";
     if (r.status === "a") return r.done_at ? "done" : "exec";
     if (isPro(r) && !r.pro_by) return "pro";
-    return lateOf(r) ? "chief" : "clerk";
+    return "clerk";
   }
-  var STAGE_ROLES = { pro: "ms", chief: "hos", clerk: "as", exec: "as" };
+  var STAGE_ROLES = { pro: "ms", clerk: "as", exec: "as" };
   function canAct(u, r) { var s = STAGE_ROLES[stage(r)]; return !!(u && s && s.indexOf(u.role) >= 0); }
   function rejText(r) { return r.auto_rejected ? L("تجاوز الحد الشهري للاستئذانات (" + LIMIT + ")", "Monthly permission limit (" + LIMIT + ") exceeded") : r.reject_reason; }
 
@@ -154,7 +154,7 @@
       R({ id: 8, user_id: 9, kind: "pleave", date_from: d(5), date_to: d(9), secret: "4321", created: at(0, 9) }),
       R({ id: 9, user_id: 9, kind: "pexit", depart_date: d(14), date_from: d(14), date_to: d(28), notes: "سفر خارج البلاد", secret: "4321", status: "a", pro_by: 7, pro_at: at(-1, 12), created: at(-2, 10) }),
       R({ id: 10, user_id: 6, kind: "emer", date_from: d(-6), date_to: d(-5), notes: "ظرف عائلي", secret: "5678", created: at(0, 7) }),
-      R({ id: 11, user_id: 5, kind: "med", date_from: d(-9), date_to: d(-8), med: medImg, status: "a", decided_by: 2, decided_at: at(-3, 11), dec_role: "chief", done_by: 4, done_at: at(-2, 9), created: at(-4, 8) })
+      R({ id: 11, user_id: 5, kind: "med", date_from: d(-9), date_to: d(-8), med: medImg, status: "a", decided_by: 8, decided_at: at(-3, 11), dec_role: "clerk", done_by: 4, done_at: at(-2, 9), created: at(-4, 8) })
     ];
     var D = { users: u, reqs: reqs, audit: [], statOk: {}, seq: { u: 10, r: 12, out: {} }, seeded: now };
     reqs.slice().sort(function (a, b) { return a.created < b.created ? -1 : 1; }).forEach(function (r) { r.ref = nextRef(D, r.created); });
@@ -266,7 +266,7 @@
       "⚠️ Demo version — data is stored in this browser only. Do not enter real secret numbers or personal data.") +
       '</span><button type="button" data-act="reset">' + L("إعادة ضبط البيانات التجريبية", "Reset demo data") + "</button></div>";
     var links = [["my", L("طلباتي", "My requests"), "emhoas"], ["pro", L("اعتماد المهنيين", "Professionals approval"), "ms"],
-      ["review", L("الطلبات المتأخرة", "Late requests"), "hos"], ["queue", L("اعتماد وتنفيذ الطلبات", "Approve & execute"), "as"], ["stats", L("الإحصائيات", "Statistics"), "mhoas"]];
+      ["review", L("متابعة الطلبات", "Requests overview"), "hos"], ["queue", L("اعتماد وتنفيذ الطلبات", "Approve & execute"), "as"], ["stats", L("الإحصائيات", "Statistics"), "mhoas"]];
     h += '<nav class="nav noprint">' + links.filter(function (l) { return l[2].indexOf(u.role) >= 0; }).map(function (l) {
       return '<a href="#/' + l[0] + '"' + (l[0] === path ? ' class="on"' : "") + ">" + l[1] + "</a>";
     }).join("") + "</nav>";
@@ -335,7 +335,7 @@
     if (r.decided_by) {
       var rej = r.status === "r", role = r.dec_role || (rej && isPro(r) && !r.pro_by ? "pro" : "");
       var lbl = rej ? (role === "pro" ? L("رفض ", "Rejected — ") + proLbl : L("مرفوض", "Rejected"))
-        : role === "chief" ? L("اعتماد (طلب متأخر)", "Approved (late request)") : L("اعتماد", "Approved");
+        : role === "chief" || (role !== "pro" && lateOf(r)) ? L("اعتماد (طلب متأخر)", "Approved (late request)") : L("اعتماد", "Approved");
       s += stamp(r.decided_by, lbl, r.decided_at, rej ? "red" : "");
     }
     if (r.done_by) s += stamp(r.done_by, L("تم عمل اللازم", "Completed"), r.done_at, "green");
@@ -460,8 +460,7 @@
       (C.kinds.length > 1 ? select("kind", L("النوع", "Type"), sub, e, kind) : '<input type="hidden" name="kind" id="f_kind" value="' + kind + '">') +
       (nw === "perm" ? '<p class="msg">' + L("استئذاناتك هذا الشهر: <b>" + n + " من " + LIMIT + "</b> — مدة الاستئذان <b>3 ساعات بالضبط</b>، وما زاد على الحد يرفضه النظام تلقائيًا.",
         "Your permissions this month: <b>" + n + " of " + LIMIT + "</b> — a permission is <b>exactly 3 hours</b>; anything over the limit is rejected automatically.") + "</p>" : "") +
-      '<p class="sub" id="route-hint">' + L("يعتمد الإداريُّ الطلب، وإذا قُدِّم بعد مضيّ يومين على تاريخه يُحال إلى ضابط القسم أو رئيس القسم.",
-        "The administrative clerk approves the request; if it is submitted more than two days after its date, it goes to the Section Officer or Head of Department.") + "</p>" +
+      '<p class="sub" id="route-hint">' + L("يعتمد الإداريُّ هذا الطلب.", "The administrative clerk approves this request.") + "</p>" +
       '<p class="sub" id="pro-hint" hidden>' + L("يُحال هذا الطلب إلى مسؤول المهنيين لاعتماده.", "This request goes to the Professionals Officer for approval.") + "</p>" +
       field("depart_date", L("تاريخ المغادرة", "Departure date"), { type: "date" }, e, v.depart_date) +
       '<div class="row">' + field("date_from", L("التاريخ / من تاريخ", "Date / from"), { type: "date", required: "" }, e, v.date_from) + field("date_to", L("إلى تاريخ", "To date"), { type: "date" }, e, v.date_to) + "</div>" +
@@ -595,7 +594,7 @@
       var lt = lateOf(r);
       log(lt ? "late" : "submit", r.id, lt || "");
       if (save()) {
-        var to = isPro(r) ? L("مسؤول المهنيين", "the Professionals Officer") : lt ? L("ضابط القسم أو رئيس القسم", "the Section Officer or Head of Department") : L("الإداري", "the administrative clerk");
+        var to = isPro(r) ? L("مسؤول المهنيين", "the Professionals Officer") : L("الإداري", "the administrative clerk");
         var okm = L("أُرسل الطلب برقم الصادر " + r.ref + "، وهو الآن لدى " + to + " للاعتماد.", "Request sent — outgoing no. " + r.ref + ". It is now with " + to + " for approval.");
         if (lt) flash("warn", okm + " " + lateCard(lt)); else flash("ok", okm);
         return nav(link("my", { c: catOf(r.kind) }));
@@ -659,14 +658,14 @@
       ["all", L("الكل", "All"), ALL]
     ], "pro");
   }
-  /* ضابط القسم / رئيس القسم: الطلبات المقدّمة بعد مضيّ يومين على تاريخها */
+  /* ضابط القسم / رئيس القسم: متابعة الطلبات للاطلاع فقط (الاعتماد عند الإداري ومسؤول المهنيين ومدير النظام) */
   function viewReview(q, u) {
-    var intro = '<p class="msg">' + L("يعتمد الإداريُّ الطلبات المقدّمة في موعدها، أما الطلبات المقدّمة بعد مضيّ يومين على تاريخها فتُعرض هنا لاعتمادها أو رفضها من ضابط القسم أو رئيس القسم.",
-      "The administrative clerk approves requests submitted on time. Requests submitted more than two days after their date appear here for the Section Officer or Head of Department to approve or reject.") + "</p>";
-    return listView("review", u, q, load().reqs, "w", [
-      ["w", L("متأخرة بانتظار اعتمادك", "Late — awaiting you"), function (r) { return stage(r) === "chief"; }, true],
-      ["late", L("كل الطلبات المتأخرة", "All late requests"), function (r) { return !!lateOf(r); }, true],
+    var intro = '<p class="msg">' + L("👁️ هذه الصفحة للاطلاع والمتابعة فقط — اعتماد الطلبات لدى الإداري ومسؤول المهنيين ومدير النظام.",
+      "👁️ This page is for viewing and follow-up only — requests are approved by the administrative clerk, the Professionals Officer and the System Administrator.") + "</p>";
+    return listView("review", u, q, load().reqs, "p", [
+      ["p", L("قيد الاعتماد", "Pending"), function (r) { return r.status === "p"; }, true],
       ["a", L("معتمد", "Approved"), function (r) { return r.status === "a"; }, true],
+      ["late", L("مقدّمة متأخرة", "Submitted late"), function (r) { return !!lateOf(r); }, true],
       ["r", L("مرفوض", "Rejected"), function (r) { return r.status === "r"; }],
       ["all", L("الكل", "All"), ALL]
     ], "review", intro);
@@ -680,7 +679,7 @@
       ["n", L("معتمد بانتظار التنفيذ", "Approved — to execute"), function (r) { return stage(r) === "exec" && !r.followups.length; }, true],
       ["f", L("يرجى المتابعة", "Follow-up needed"), function (r) { return stage(r) === "exec" && r.followups.length; }, true],
       ["d", L("تم عمل اللازم", "Completed"), function (r) { return stage(r) === "done"; }, true],
-      ["o", L("لدى جهة أخرى", "With another approver"), function (r) { return stage(r) === "pro" || stage(r) === "chief"; }],
+      ["o", L("لدى جهة أخرى", "With another approver"), function (r) { return stage(r) === "pro"; }],
       ["r", L("مرفوض", "Rejected"), function (r) { return r.status === "r"; }],
       ["all", L("الكل", "All"), ALL]
     ], "queue", duty);
@@ -710,10 +709,6 @@
         if (can) h += (isAdm ? '<p class="wait">✍️ ' + L("توقيعك هنا يكون بالنيابة عن مسؤول المهنيين (بختمك)", "You sign here on behalf of the Professionals Officer (with your stamp)") + "</p>" : "") +
           decideForm("pro", r.id, isAdm ? L("اعتماد عن مسؤول المهنيين", "Approve for Professionals Officer") : L("اعتماد", "Approve"));
         else h += '<p class="wait">⏳ ' + L("بانتظار اعتماد مسؤول المهنيين", "Awaiting the Professionals Officer") + "</p>";
-      } else if (sg === "chief") {
-        if (can) h += '<p class="wait">⚖️ ' + L("طلب متأخر: اعتماده من صلاحية ضابط القسم أو رئيس القسم", "Late request: approval rests with the Section Officer or Head of Department") + "</p>" +
-          decideForm("decide", r.id, L("اعتماد", "Approve"));
-        else h += '<p class="wait">⏳ ' + L("بانتظار اعتماد ضابط القسم أو رئيس القسم (طلب متأخر)", "Awaiting the Section Officer or Head of Department (late request)") + "</p>";
       } else if (sg === "clerk") {
         if (can) h += decideForm("decide", r.id, L("اعتماد", "Approve"));
         else h += '<p class="wait">⏳ ' + L("بانتظار اعتماد الإداري", "Awaiting the administrative clerk") + "</p>";
@@ -722,7 +717,7 @@
         h += '<form class="qa" data-f="qact" data-id="' + r.id + '"><input name="note" placeholder="' + L("المطلوب متابعته (للمتابعة فقط)", "What needs follow-up (follow-up only)") + '">' +
           '<button class="g" name="do" value="done">' + L("تم عمل اللازم", "Completed") + '</button><button class="o" name="do" value="follow">' + L("يرجى المتابعة", "Needs follow-up") + "</button></form>";
       }
-      if (mode === "queue" && u.phone && sg !== "pro" && sg !== "chief" && sg !== "clerk") h += '<a class="wa" target="_blank" rel="noopener" href="' + waLink(r, u) + '">' + L("أرسل واتساب", "Send WhatsApp") + "</a>";
+      if (mode === "queue" && u.phone && sg !== "pro" && sg !== "clerk") h += '<a class="wa" target="_blank" rel="noopener" href="' + waLink(r, u) + '">' + L("أرسل واتساب", "Send WhatsApp") + "</a>";
       return h + "</div>";
     }).join("");
   }
@@ -733,7 +728,6 @@
     if (sg === "done") return ["g", L("تم عمل اللازم", "Completed")];
     if (sg === "exec") return r.followups.length ? ["f", L("يرجى المتابعة", "Follow-up needed")] : mode === "queue" ? ["y", L("بانتظار التنفيذ", "To execute")] : ["g", L("معتمد", "Approved")];
     if (sg === "pro") return ["y", mode === "pro" ? L("بانتظار اعتمادك", "Awaiting your approval") : L("بانتظار مسؤول المهنيين", "With Professionals Officer")];
-    if (sg === "chief") return ["y", mode === "review" ? L("متأخر — بانتظار اعتمادك", "Late — awaiting you") : L("بانتظار ضابط/رئيس القسم", "With Officer / Head")];
     return ["y", mode === "queue" ? L("بانتظار اعتمادك", "Awaiting your approval") : L("بانتظار اعتماد الإداري", "With admin clerk")];
   }
   // رسالة واتساب جاهزة للموظف (أرقام الكويت 8 خانات + 965)
@@ -755,10 +749,9 @@
     r.pro_proxy = who.role !== "m"; // توقيع مدير النظام بالنيابة عن مسؤول المهنيين
     if (act === "a") {
       r.pro_by = who.id; r.pro_at = now;
-      if (!lateOf(r)) r.status = "a"; // اعتماد مسؤول المهنيين نهائي، والتنفيذ عند الإداري
+      r.status = "a"; // اعتماد مسؤول المهنيين نهائي، والتنفيذ عند الإداري
       log("pro_ok", r.id, r.pro_proxy ? "proxy" : "");
-      flash("ok", lateOf(r) ? L("تم الاعتماد، وأُحيل الطلب إلى ضابط القسم أو رئيس القسم لتأخر تقديمه.", "Approved — forwarded to the Section Officer or Head of Department because it was submitted late.")
-        : L("تم اعتماد الطلب، وأُحيل إلى الإداري للتنفيذ.", "Request approved and sent to the administrative clerk for execution."));
+      flash("ok", L("تم اعتماد الطلب، وأُحيل إلى الإداري للتنفيذ.", "Request approved and sent to the administrative clerk for execution."));
     } else {
       r.status = "r"; r.reject_reason = why; r.decided_by = who.id; r.decided_at = now; r.dec_role = "pro";
       log("pro_rej", r.id, r.pro_proxy ? "proxy" : "");
@@ -767,11 +760,11 @@
   }
   function doDecide(form, submitter) {
     var r = reqById(+form.dataset.id), why = form.reason.value.trim(), act = submitter && submitter.value, who = me(), sg = r && stage(r);
-    if (!r || (sg !== "chief" && sg !== "clerk") || !canAct(who, r)) return render();
+    if (!r || sg !== "clerk" || !canAct(who, r)) return render();
     if (act === "r" && !why) { flash("err", L("يجب كتابة سبب الرفض", "A rejection reason is required")); return render(); }
     r.status = act === "a" ? "a" : "r"; r.reject_reason = act === "r" ? why : "";
     r.decided_by = who.id; r.decided_at = new Date().toISOString(); r.dec_role = sg;
-    log(act === "a" ? (sg === "chief" ? "ok_late" : "ok") : "rej", r.id);
+    log(act === "a" ? (lateOf(r) ? "ok_late" : "ok") : "rej", r.id);
     flash("ok", act === "a" ? L("تم اعتماد الطلب رقم الصادر " + r.ref, "Request " + r.ref + " approved") : L("تم رفض الطلب رقم الصادر " + r.ref, "Request " + r.ref + " rejected"));
     save(); render();
   }

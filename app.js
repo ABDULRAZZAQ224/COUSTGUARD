@@ -88,8 +88,8 @@
   }
   function lateBox(r) { var n = lateOf(r); return n ? '<p class="late">' + lateCard(n) + "</p>" : ""; }
   function leaveNote() {
-    return L("📌 تنبيه: يجب على الموظف الحضور إلى القسم ومباشرة العمل فور انتهاء الإجازة.",
-      "📌 Notice: the employee must report to the department and resume duty immediately after the leave ends.");
+    return L("📌 تنبيه: يجب على الموظف عند تقديم طلب الإجازة الحضور إلى القسم لاعتمادها، كما يجب عليه الحضور إلى القسم ومباشرة العمل فور انتهاء الإجازة.",
+      "📌 Notice: when submitting a leave request, the employee must attend the department in person for its approval, and must also report to the department and resume duty immediately after the leave ends.");
   }
   function leaveBox(r) { return LEAVE_KINDS.indexOf(r.kind) >= 0 && r.status !== "r" ? '<p class="note-l">' + leaveNote() + "</p>" : ""; }
 

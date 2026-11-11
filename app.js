@@ -282,6 +282,7 @@
     else if (route.roles.indexOf(u.role) < 0) { flash("err", L("ليس لديك صلاحية لهذه الصفحة", "You do not have access to this page")); return go(HOME[u.role]); }
     route = ROUTES[r.path];
     route.after = null;
+    if (r.path !== "stats") statTemp = null;
     var body = route.view(r.q, u);
     var msgs = flashes.map(function (m) { return '<p class="msg ' + m.type + '">' + esc(m.text) + "</p>"; }).join("");
     flashes = [];
@@ -900,6 +901,7 @@
     Promise.all(imgs).then(function () { window.print(); });
   }
   window.addEventListener("afterprint", function () {
+    if (statTemp) { statTemp = null; render(); } // اعتماد الإحصائية لمرة واحدة: يرجع التقرير طبيعي بعد الطباعة
     if (!document.body.classList.contains("pmode")) return;
     document.body.classList.remove("pmode"); document.getElementById("print").innerHTML = "";
   });
@@ -907,8 +909,11 @@
   /* ---------- الإحصائيات ---------- */
   var PER = { week: ["أسبوع (آخر 7 أيام)", "Week (last 7 days)"], month: ["شهر (من أول الشهر)", "Month (since the 1st)"], "3m": ["3 أشهر", "3 months"],
               "6m": ["6 أشهر", "6 months"], year: ["سنة كاملة (يناير - ديسمبر)", "Full year (Jan - Dec)"] };
+  // اعتماد الإحصائية مؤقت (لهذه الطباعة فقط) — لا يُحفظ، ويُلغى بعد الطباعة أو عند تغيير التقرير
+  var statTemp = null;
   function viewStats(q, u) {
-    var p = PER[q.p] ? q.p : "month", s = (q.q || "").trim(), now = new Date(), since, until, end;
+    var p = PER[q.p] ? q.p : "month", now = new Date(), since, until, end;
+    var eu = q.e ? userById(+q.e) : null, eid = eu ? eu.id : 0;
     if (p === "week") { since = addDays(new Date(now.getFullYear(), now.getMonth(), now.getDate()), -7); until = new Date(+now + 6e4); end = now; }
     else {
       var back = { month: 0, "3m": 2, "6m": 5, year: now.getMonth() }[p];
@@ -917,7 +922,7 @@
       if (p === "year") until = new Date(since.getFullYear() + 1, 0, 1);
       end = addDays(until, -1);
     }
-    var D = load(), qs = byName(D.reqs.filter(function (r) { var c = new Date(r.created); return c >= since && c < until; }), s);
+    var D = load(), qs = D.reqs.filter(function (r) { var c = new Date(r.created); return c >= since && c < until && (!eid || r.user_id === eid); });
     var kinds = {}, tot = { all: 0, p: 0, a: 0, r: 0 }, late = 0, emp = {}, lv = { leave: [0, 0], emer: [0, 0], med: [0, 0], pleave: [0, 0], pexit: [0, 0] };
     qs.forEach(function (r) {
       tot.all++; tot[r.status]++; if (lateOf(r)) late++;
@@ -936,18 +941,22 @@
     var eRows = Object.keys(emp).sort(function (a, b) { return a.localeCompare(b, "ar"); }).map(function (n) { var e = emp[n]; return "<tr><td>" + esc(n) + "</td><td>" + e.perm + "</td><td>" + e.leave + "</td><td>" + e.days + "</td><td>" + e.rej + "</td></tr>"; }).join("");
     var nowS = ymd(now) + " " + pad(now.getHours()) + ":" + pad(now.getMinutes());
     // الاعتماد = الإداري اللي صدّر الإحصائية (زر اعتماد)
-    var key = p + "|" + s + "|" + ymd(since), ok = D.statOk[key], canOk = "ams".indexOf(u.role) >= 0;
-    var head = D.users.filter(function (x) { return x.role === "h"; })[0];
-    var okBar = ok ? '<p class="msg ok noprint">✔ ' + L("الإحصائية معتمدة من ", "Statistics approved by ") + esc(nameLine(userById(ok.by) || {})) + " — " + ymdhm(ok.at) + "</p>"
-      : canOk ? '<p class="noprint"><button class="p g" type="button" data-act="stat-ok" data-key="' + esc(key) + '">' + L("اعتماد الإحصائية", "Approve statistics") + '</button> <small class="sub">' + L("(يظهر ختمك في خانة الاعتماد)", "(your stamp appears in the approval box)") + "</small></p>"
-      : '<p class="msg noprint">' + L("الإحصائية غير معتمدة بعد — الاعتماد من الإداري أو مسؤول المهنيين.", "Not approved yet — approval is by the administrative clerk or the Professionals Officer.") + "</p>";
-    return '<form class="flt noprint" data-f="filter" data-path="stats"><input name="q" value="' + esc(s) + '" placeholder="' + L("ابحث باسم الموظف", "Search by employee name") + '"><select name="p">' +
+    var key = p + "|" + eid + "|" + ymd(since), canOk = "ams".indexOf(u.role) >= 0;
+    if (statTemp && statTemp.key !== key) statTemp = null;
+    var ok = statTemp, head = D.users.filter(function (x) { return x.role === "h"; })[0];
+    var okBar = ok ? '<p class="msg ok noprint">✔ ' + L("معتمدة لهذه الطباعة فقط — تعود الإحصائية بدون اعتماد تلقائيًا بعد الطباعة.", "Approved for this printout only — it returns to unapproved automatically after printing.") + "</p>"
+      : canOk ? '<p class="noprint"><button class="p g" type="button" data-act="stat-ok" data-key="' + esc(key) + '">✍️ ' + L("اعتماد وطباعة هذه الإحصائية", "Approve & print this report") +
+        '</button> <small class="sub">' + L("(يظهر ختمك لهذه الطباعة فقط، ثم تعود الإحصائية طبيعية بدون اعتماد)", "(your stamp appears for this printout only, then the report returns to normal)") + "</small></p>"
+      : '<p class="msg noprint">' + L("الاعتماد عند الطباعة من الإداري أو مسؤول المهنيين.", "Approval is added at print time by the administrative clerk or the Professionals Officer.") + "</p>";
+    var people = D.users.slice().sort(function (a, b) { return a.full_name.localeCompare(b.full_name, "ar"); });
+    return '<form class="flt noprint" data-f="filter" data-path="stats"><select name="e"><option value="">' + L("جميع الموظفين", "All employees") + "</option>" +
+      people.map(function (x) { return '<option value="' + x.id + '"' + (x.id === eid ? " selected" : "") + ">" + esc(x.full_name) + " — " + esc(x.job_title) + "</option>"; }).join("") + '</select><select name="p">' +
       Object.keys(PER).map(function (k) { return '<option value="' + k + '"' + (k === p ? " selected" : "") + ">" + T(PER[k]) + "</option>"; }).join("") + "</select><button>" + L("عرض", "Show") + "</button></form>" +
       okBar +
       '<p class="noprint"><button class="p" type="button" data-act="print">' + L("تصدير PDF", "Export PDF") + '</button> <small class="sub">' + L("(من نافذة الطباعة اختر «حفظ بصيغة PDF»)", "(choose “Save as PDF” in the print dialog)") + "</small></p>" +
       letterhead(L("تاريخ الإصدار", "Issued on")) +
-      '<div class="rt"><h1>' + L("تقرير إحصائية الطلبات الإدارية", "Administrative Requests Statistics") + "</h1><p>" + T(PER[p]) + "</p></div>" +
-      '<div class="tw"><table class="meta"><tr><th>' + L("الفترة", "Period") + "</th><td>" + L("من ", "from ") + ymd(since) + L(" إلى ", " to ") + ymd(end) + "</td><th>" + L("الموظف", "Employee") + "</th><td>" + esc(s || L("جميع الموظفين", "All employees")) + "</td></tr>" +
+      '<div class="rt"><h1>' + L("تقرير إحصائية الطلبات الإدارية", "Administrative Requests Statistics") + (eu ? " — " + esc(eu.full_name) : "") + "</h1><p>" + T(PER[p]) + "</p></div>" +
+      '<div class="tw"><table class="meta"><tr><th>' + L("الفترة", "Period") + "</th><td>" + L("من ", "from ") + ymd(since) + L(" إلى ", " to ") + ymd(end) + "</td><th>" + L("الموظف", "Employee") + "</th><td>" + (eu ? esc(eu.full_name) + " (" + esc(eu.job_title) + ")" : L("جميع الموظفين", "All employees")) + "</td></tr>" +
       "<tr><th>" + L("الاعتماد", "Approval") + "</th><td>" + (ok ? esc(nameLine(userById(ok.by) || {})) + " (" + esc((userById(ok.by) || {}).job_title) + ")" : L("غير معتمدة بعد", "Not approved yet")) + "</td><th>" + L("وقت الإصدار", "Issued at") + "</th><td>" + nowS + "</td></tr></table></div>" +
       '<div class="kp"><div><b>' + tot.all + "</b>" + L("إجمالي الطلبات", "Total requests") + "</div><div><b>" + tot.p + "</b>" + L("قيد الاعتماد", "Pending") + "</div><div><b>" + tot.a + "</b>" + L("معتمد", "Approved") +
       "</div><div><b>" + tot.r + "</b>" + L("مرفوض", "Rejected") + "</div><div><b>" + late + "</b>" + L("مقدّمة متأخرة", "Submitted late") + "</div><div><b>" + ld + "</b>" + L("أيام الإجازات", "Leave days") + "</div></div>" +
@@ -1117,8 +1126,11 @@
       }
     }
     else if (act === "stat-ok" && u0 && "ams".indexOf(u0.role) >= 0) {
-      load().statOk[b.dataset.key] = { by: u0.id, at: new Date().toISOString() };
-      log("stat", null, T(PER[b.dataset.key.split("|")[0]] || ["", ""])); save(); flash("ok", L("تم اعتماد الإحصائية", "Statistics approved")); render();
+      var sk = b.dataset.key.split("|"), se = +sk[1] ? userById(+sk[1]) : null;
+      statTemp = { key: b.dataset.key, by: u0.id, at: new Date().toISOString() };
+      log("stat", null, T(PER[sk[0]] || ["", ""]) + " — " + (se ? se.full_name : L("جميع الموظفين", "All employees"))); save();
+      render();
+      setTimeout(function () { window.print(); }, 350); // الختم يظهر بالطباعة، وبعدها يرجع التقرير طبيعي
     }
     else if (act === "remind") {
       var rq = reqById(+b.dataset.id), sel = document.getElementById("rm" + b.dataset.id), adm = sel && load().roster.filter(function (x) { return x.id === +sel.value; })[0];

@@ -156,7 +156,13 @@
       R({ id: 10, user_id: 6, kind: "emer", date_from: d(-6), date_to: d(-5), notes: "ظرف عائلي", secret: "5678", created: at(0, 7) }),
       R({ id: 11, user_id: 5, kind: "med", date_from: d(-9), date_to: d(-8), med: medImg, status: "a", decided_by: 8, decided_at: at(-3, 11), dec_role: "clerk", done_by: 4, done_at: at(-2, 9), created: at(-4, 8) })
     ];
-    var D = { users: u, reqs: reqs, audit: [], statOk: {}, seq: { u: 10, r: 12, out: {} }, seeded: now };
+    // جدول المداومة التجريبي: إداريّان بالتناوب (يوم عمل ويوم راحة) + مدير النظام بأيام ثابتة
+    var roster = [
+      { id: 1, uid: 4, name: "", phone: "", mode: "cycle", days: [], on: 1, off: 1, start: d(0) },
+      { id: 2, uid: 8, name: "", phone: "", mode: "cycle", days: [], on: 1, off: 1, start: d(1) },
+      { id: 3, uid: 1, name: "", phone: "", mode: "week", days: [0, 1, 2, 3, 4], on: 1, off: 0, start: d(0) }
+    ];
+    var D = { users: u, reqs: reqs, roster: roster, audit: [], statOk: {}, seq: { u: 10, r: 12, out: {}, d: 4 }, seeded: now };
     reqs.slice().sort(function (a, b) { return a.created < b.created ? -1 : 1; }).forEach(function (r) { r.ref = nextRef(D, r.created); });
     return D;
   }
@@ -166,6 +172,13 @@
     if (!db || !db.users) { db = seed(); save(); }
     if (!db.statOk) db.statOk = {};
     if (!db.seq.out) db.seq.out = {};
+    if (!db.roster) { // ترقية: أنشئ جدول المداومة من الإداريين الحاليين
+      var t0 = today(), t1 = ymd(addDays(new Date(), 1));
+      db.roster = db.users.filter(function (u) { return u.role === "a"; }).map(function (u, i) {
+        return { id: i + 1, uid: u.id, name: "", phone: "", mode: "cycle", days: [], on: 1, off: 1, start: u.duty === t0 ? t0 : t1 };
+      });
+      db.seq.d = db.roster.length + 1; save();
+    }
     // ترقية بيانات النسخة السابقة: رقم صادر لكل طلب، وربط سجل العمليات بالطلب
     var miss = db.reqs.filter(function (r) { return !r.ref; }).sort(function (a, b) { return a.created < b.created ? -1 : 1; });
     miss.forEach(function (r) { r.ref = nextRef(db, r.created); });
@@ -183,7 +196,29 @@
   function userById(id) { return load().users.filter(function (u) { return u.id === id; })[0] || null; }
   function uname(id) { var u = userById(id); return u ? u.full_name : "—"; }
   function nameLine(u) { return u.rank ? u.rank + " / " + u.full_name : u.full_name; }
-  function onDuty(u) { return u.duty === today(); }
+  /* ---------- جدول المداومة: مدير النظام يحدد المداومين وآلية العمل، والنظام يحسب تلقائيًا ---------- */
+  var WD = [["الأحد", "Sun"], ["الإثنين", "Mon"], ["الثلاثاء", "Tue"], ["الأربعاء", "Wed"], ["الخميس", "Thu"], ["الجمعة", "Fri"], ["السبت", "Sat"]];
+  function dutyName(e) { var u = e.uid ? userById(e.uid) : null; return u ? u.full_name : e.name; }
+  function dutyPhone(e) { var u = e.uid ? userById(e.uid) : null; return e.phone || (u ? u.phone : ""); }
+  function dutyOn(e, d) {
+    d = d || new Date();
+    var day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    if (e.mode === "cycle") {
+      var len = (+e.on || 0) + (+e.off || 0); if (!len || !e.start) return false;
+      var diff = Math.round((day - parseDate(e.start)) / 864e5);
+      return ((diff % len) + len) % len < +e.on;
+    }
+    return (e.days || []).indexOf(day.getDay()) >= 0;
+  }
+  function dutyOf(u) { return load().roster.filter(function (e) { return e.uid === u.id; })[0] || null; }
+  function onDuty(u) { var e = dutyOf(u); return !!(e && dutyOn(e)); }
+  function nextDuty(e) { for (var i = 1; i <= 120; i++) { var d = addDays(new Date(), i); if (dutyOn(e, d)) return d; } return null; }
+  function dutyRule(e) {
+    if (e.mode === "cycle") return L("مناوبة دورية: أيام العمل " + e.on + " / أيام الراحة " + e.off + "، بدءًا من " + e.start,
+      "Rotation: " + daysTxt(+e.on) + " on, " + daysTxt(+e.off) + " off, starting " + e.start);
+    return L("أيام ثابتة: ", "Fixed days: ") + (e.days || []).slice().sort().map(function (i) { return T(WD[i]); }).join(L("، ", ", "));
+  }
+  function dutyToday() { return load().roster.filter(function (e) { return dutyOn(e); }); }
   function reqById(id) { return load().reqs.filter(function (r) { return r.id === id; })[0]; }
 
   /* ---------- سجل العمليات ---------- */
@@ -193,7 +228,8 @@
     pro_ok: ["اعتماد مسؤول المهنيين", "Professionals Officer approval"], pro_rej: ["رفض مسؤول المهنيين", "Professionals Officer rejection"],
     ok: ["اعتماد الطلب", "Request approved"], ok_late: ["اعتماد طلب متأخر", "Late request approved"], rej: ["رفض الطلب", "Request rejected"],
     follow: ["طلب متابعة", "Follow-up requested"], done: ["تم عمل اللازم", "Completed"], print: ["طباعة الطلب", "Request printed"],
-    reveal: ["عرض الرقم السري", "Secret number viewed"], remind: ["تذكير الإداري", "Clerk reminded"], stat: ["اعتماد الإحصائية", "Statistics approved"]
+    reveal: ["عرض الرقم السري", "Secret number viewed"], remind: ["تذكير الإداري", "Clerk reminded"], stat: ["اعتماد الإحصائية", "Statistics approved"],
+    duty_add: ["إضافة إلى جدول المداومة", "Added to duty roster"], duty_edit: ["تعديل جدول المداومة", "Duty roster edited"], duty_del: ["حذف من جدول المداومة", "Removed from duty roster"]
   };
   function log(act, rid, x) {
     var u = me();
@@ -222,7 +258,8 @@
     review: { roles: "hos", view: viewReview },
     queue: { roles: "as", view: viewQueue },
     stats: { roles: "mhoas", view: viewStats },
-    users: { roles: "s", view: viewUsers }
+    users: { roles: "s", view: viewUsers },
+    duty: { roles: "s", view: viewDuty }
   };
   function parseHash() {
     var h = location.hash.replace(/^#\/?/, ""), i = h.indexOf("?"), q = {};
@@ -266,7 +303,7 @@
       "⚠️ Demo version — data is stored in this browser only. Do not enter real secret numbers or personal data.") +
       '</span><button type="button" data-act="reset">' + L("إعادة ضبط البيانات التجريبية", "Reset demo data") + "</button></div>";
     var links = [["my", L("طلباتي", "My requests"), "emhoas"], ["pro", L("اعتماد المهنيين", "Professionals approval"), "ms"],
-      ["review", L("متابعة الطلبات", "Requests overview"), "hos"], ["queue", L("اعتماد وتنفيذ الطلبات", "Approve & execute"), "as"], ["stats", L("الإحصائيات", "Statistics"), "mhoas"]];
+      ["review", L("متابعة الطلبات", "Requests overview"), "hos"], ["queue", L("اعتماد وتنفيذ الطلبات", "Approve & execute"), "as"], ["stats", L("الإحصائيات", "Statistics"), "mhoas"], ["duty", L("جدول المداومة", "Duty roster"), "s"]];
     h += '<nav class="nav noprint">' + links.filter(function (l) { return l[2].indexOf(u.role) >= 0; }).map(function (l) {
       return '<a href="#/' + l[0] + '"' + (l[0] === path ? ' class="on"' : "") + ">" + l[1] + "</a>";
     }).join("") + "</nav>";
@@ -508,15 +545,16 @@
   }
   // تذكير الإداري المداوم بالطلب على الواتساب
   function remindBox(r) {
-    var admins = load().users.filter(function (x) { return x.role === "a" && x.phone; })
-      .sort(function (a, b) { return (onDuty(b) ? 1 : 0) - (onDuty(a) ? 1 : 0); });
-    if (!admins.length) return "";
-    return '<div class="remind"><span>' + L("لم يطّلع الإداري على طلبك؟ ذكّره:", "Clerk hasn't seen it? Remind them:") + '</span><select id="rm' + r.id + '">' + admins.map(function (a) {
-      return '<option value="' + a.id + '">' + (onDuty(a) ? "🟢 " : "⚪ ") + esc(a.full_name) + (onDuty(a) ? L(" (مداوم اليوم)", " (on duty today)") : L(" (غير مداوم)", " (off duty)")) + "</option>";
+    var list = load().roster.filter(function (e) { return dutyPhone(e); })
+      .sort(function (a, b) { return (dutyOn(b) ? 1 : 0) - (dutyOn(a) ? 1 : 0); });
+    if (!list.length) return "";
+    return '<div class="remind"><span>' + L("لم يطّلع الإداري على طلبك؟ ذكّر المداوم:", "Not seen yet? Remind the person on duty:") + '</span><select id="rm' + r.id + '">' + list.map(function (e) {
+      var on = dutyOn(e);
+      return '<option value="' + e.id + '">' + (on ? "🟢 " : "⚪ ") + esc(dutyName(e)) + (on ? L(" (مداوم اليوم)", " (on duty today)") : L(" (غير مداوم)", " (off duty)")) + "</option>";
     }).join("") + '</select><button type="button" class="wa sm" data-act="remind" data-id="' + r.id + '">' + L("تذكير واتساب", "WhatsApp reminder") + "</button></div>";
   }
-  function remindLink(r, admin) {
-    var emp = userById(r.user_id) || {};
+  function remindLink(r, e) {
+    var emp = userById(r.user_id) || {}, admin = { full_name: dutyName(e), phone: dutyPhone(e) };
     var msg = L("السلام عليكم " + admin.full_name + "،\nتذكير بالطلب رقم الصادر " + r.ref + " (" + K(r.kind) + ") للموظف " + emp.full_name + " بتاريخ " + r.date_from +
       (r.date_to ? " إلى " + r.date_to : "") + "\nحالة الطلب: " + pill(r, "my")[1] + "\nيرجى الاطلاع واتخاذ اللازم، وشكرًا.\n\nنظام الطلبات - قسم الكهرباء والإلكترونيات",
       "Hello " + admin.full_name + ",\nA reminder about request no. " + r.ref + " (" + K(r.kind) + ") for " + emp.full_name + " dated " + r.date_from +
@@ -672,8 +710,12 @@
   }
   /* الإداري: اعتماد الطلبات في موعدها + تنفيذ كل الطلبات المعتمدة */
   function viewQueue(q, u) {
-    var duty = u.role === "a" ? '<div class="duty"><span>' + L("حالتك اليوم: ", "Today: ") + (onDuty(u) ? "🟢 <b>" + L("مداوم", "On duty") + "</b>" : "⚪ <b>" + L("غير مداوم", "Off duty") + "</b>") +
-      '</span><button type="button" data-act="duty">' + (onDuty(u) ? L("تسجيل غير مداوم", "Mark off duty") : L("تسجيل مداوم اليوم", "Mark on duty today")) + "</button></div>" : "";
+    var mine = dutyOf(u), nd = mine && !dutyOn(mine) ? nextDuty(mine) : null, tl = dutyToday();
+    var duty = '<div class="duty"><span>' + (u.role === "a" ? (mine ? L("حالتك اليوم حسب جدول المداومة: ", "Today, per the duty roster: ") +
+        (dutyOn(mine) ? "🟢 <b>" + L("مداوم", "On duty") + "</b>" : "⚪ <b>" + L("غير مداوم", "Off duty") + "</b>" + (nd ? L(" — مداومتك القادمة: ", " — next duty: ") + T(WD[nd.getDay()]) + " " + ymd(nd) : ""))
+        : L("لست مُدرجًا في جدول المداومة", "You are not on the duty roster")) + "<br>" : "") +
+      L("المداومون اليوم: ", "On duty today: ") + "<b>" + (tl.length ? tl.map(function (e) { return esc(dutyName(e)); }).join(L("، ", ", ")) : "—") + "</b></span>" +
+      (u.role === "s" ? '<a class="pbtn" href="#/duty">' + L("إدارة جدول المداومة", "Manage duty roster") + "</a>" : "") + "</div>";
     return listView("queue", u, q, load().reqs.filter(function (r) { return !r.auto_rejected; }), "w", [
       ["w", L("بانتظار اعتمادك", "Awaiting your approval"), function (r) { return stage(r) === "clerk"; }, true],
       ["n", L("معتمد بانتظار التنفيذ", "Approved — to execute"), function (r) { return stage(r) === "exec" && !r.followups.length; }, true],
@@ -922,6 +964,68 @@
       '<div class="ft">' + L("تقرير آلي من نظام الطلبات الإدارية - قسم الكهرباء والإلكترونيات - للاستخدام الداخلي — ", "Automatic report — Administrative Requests System - Electrical & Electronics Dept. - internal use — ") + CREDIT + "</div>";
   }
 
+  /* ---------- جدول المداومة (مدير النظام) ---------- */
+  function dutyForm(e) {
+    var isNew = !e;
+    e = e || { id: "", uid: null, name: "", phone: "", mode: "week", days: [0, 1, 2, 3, 4], on: 1, off: 1, start: today() };
+    var nd = !isNew && !dutyOn(e) ? nextDuty(e) : null;
+    var opt = function (v, t, on) { return '<option value="' + v + '"' + (on ? " selected" : "") + ">" + t + "</option>"; };
+    return '<form class="box dform" data-f="duty" data-id="' + e.id + '" data-mode="' + e.mode + '">' +
+      (isNew ? '<div class="fh"><b>➕ ' + L("إضافة شخص إلى جدول المداومة", "Add a person to the roster") + "</b></div>"
+        : '<div class="fh"><b>' + (dutyOn(e) ? "🟢 " : "⚪ ") + esc(dutyName(e)) + '</b><button type="button" class="pbtn del" data-act="duty-del" data-id="' + e.id + '">🗑 ' + L("حذف من الجدول", "Remove") + "</button></div>" +
+          '<p class="sub">' + esc(dutyRule(e)) + " — " + (dutyOn(e) ? L("مداوم اليوم", "on duty today") : L("غير مداوم اليوم", "off today") + (nd ? L("، مداومته القادمة ", ", next duty ") + T(WD[nd.getDay()]) + " " + ymd(nd) : "")) + "</p>") +
+      '<div class="row"><div class="fld"><label>' + L("من حسابات النظام", "System account") + '</label><select name="uid">' + opt("", L("— اسم من خارج النظام —", "— not a system user —"), !e.uid) +
+      load().users.map(function (u) { return opt(u.id, esc(u.full_name) + " (" + roleName(u.role) + ")", e.uid === u.id); }).join("") + "</select></div>" +
+      '<div class="fld"><label>' + L("الاسم (لمن ليس له حساب)", "Name (if no account)") + '</label><input name="name" dir="auto" value="' + esc(e.uid ? "" : e.name) + '"></div></div>' +
+      '<div class="row"><div class="fld"><label>' + L("رقم الواتساب (8 أرقام)", "WhatsApp number (8 digits)") + '</label><input name="phone" inputmode="numeric" maxlength="8" value="' + esc(e.phone) +
+      '" placeholder="' + esc(e.uid ? (userById(e.uid) || {}).phone || "" : "") + '"></div>' +
+      '<div class="fld"><label>' + L("آلية العمل", "Work pattern") + '</label><select name="mode">' + opt("week", L("أيام ثابتة من الأسبوع", "Fixed weekdays"), e.mode !== "cycle") +
+      opt("cycle", L("مناوبة دورية (عمل ثم راحة)", "Rotation (on then off)"), e.mode === "cycle") + "</select></div></div>" +
+      '<div class="wk"><label>' + L("أيام الدوام", "Working days") + '</label><div class="days">' + WD.map(function (w, i) {
+        return '<label><input type="checkbox" name="d' + i + '"' + ((e.days || []).indexOf(i) >= 0 ? " checked" : "") + "> " + T(w) + "</label>";
+      }).join("") + "</div></div>" +
+      '<div class="cyc row3"><div class="fld"><label>' + L("أيام العمل", "Days on") + '</label><input name="on" type="number" min="1" max="30" value="' + esc(e.on) + '"></div>' +
+      '<div class="fld"><label>' + L("أيام الراحة", "Days off") + '</label><input name="off" type="number" min="0" max="30" value="' + esc(e.off) + '"></div>' +
+      '<div class="fld"><label>' + L("أول يوم عمل", "First day on") + '</label><input name="start" type="date" value="' + esc(e.start) + '"></div></div>' +
+      '<p><button class="p">' + (isNew ? L("إضافة", "Add") : L("حفظ التعديل", "Save")) + "</button></p></form>";
+  }
+  function viewDuty() {
+    var R = load().roster, days = [], on = dutyToday();
+    for (var i = 0; i < 14; i++) days.push(addDays(new Date(), i));
+    var grid = '<div class="tw"><table class="dgrid"><thead><tr><th>' + L("الاسم", "Name") + "</th>" + days.map(function (d, i) {
+        return "<th" + (i ? "" : ' class="td"') + ">" + T(WD[d.getDay()]) + "<br><small>" + pad(d.getDate()) + "/" + pad(d.getMonth() + 1) + "</small></th>";
+      }).join("") + "</tr></thead><tbody>" + R.map(function (e) {
+        return "<tr><td>" + esc(dutyName(e)) + "</td>" + days.map(function (d) { return dutyOn(e, d) ? '<td class="on">●</td>' : '<td class="off">—</td>'; }).join("") + "</tr>";
+      }).join("") + "</tbody></table></div>";
+    return "<h2>" + L("جدول المداومة", "Duty roster") + '</h2><p class="sub">' +
+      L("حدّد الأشخاص المداومين وآلية عمل كل شخص، والنظام يحسب تلقائيًا من المداوم ومن غير المداوم في كل يوم. المداوم اليوم يظهر أولًا في تذكير الواتساب.",
+        "Set who is on the roster and each person's work pattern; the system works out automatically who is on duty each day. Today's on-duty people come first in WhatsApp reminders.") + "</p>" +
+      '<div class="tiles"><div><b>' + on.length + "</b>" + L("مداوم اليوم", "On duty today") + "</div><div><b>" + (R.length - on.length) + "</b>" + L("غير مداوم اليوم", "Off today") +
+      "</div><div><b>" + R.length + "</b>" + L("في الجدول", "On the roster") + "</div></div>" +
+      '<div class="duty"><span>🟢 ' + L("المداومون اليوم: ", "On duty today: ") + "<b>" + (on.length ? on.map(function (e) { return esc(dutyName(e)); }).join(L("، ", ", ")) : "—") + "</b></span></div>" +
+      '<h3 class="sh">' + L("الأيام الـ14 القادمة", "Next 14 days") + "</h3>" + (R.length ? grid : "<p>" + L("الجدول فارغ.", "The roster is empty.") + "</p>") +
+      '<h3 class="sh">' + L("الأشخاص وآلية العمل", "People & work patterns") + "</h3>" + R.map(function (e) { return dutyForm(e); }).join("") + dutyForm(null);
+  }
+  function doDuty(form) {
+    var who = me(); if (!who || who.role !== "s") return render();
+    var d = formData(form), D = load(), id = +form.dataset.id || 0, u = d.uid ? userById(+d.uid) : null;
+    var name = u ? u.full_name : d.name, ph = enDigits(d.phone || ""), on = parseInt(d.on, 10), off = parseInt(d.off, 10);
+    var days = WD.map(function (w, i) { return i; }).filter(function (i) { return d["d" + i]; });
+    var err = !name ? L("اختر حسابًا من النظام أو اكتب الاسم", "Choose a system account or type a name")
+      : u && D.roster.some(function (e) { return e.uid === u.id && e.id !== id; }) ? L("هذا الشخص موجود في الجدول مسبقًا", "This person is already on the roster")
+      : ph && !/^\d{8}$/.test(ph) ? L("رقم الواتساب يجب أن يكون 8 أرقام", "The WhatsApp number must be 8 digits")
+      : d.mode === "cycle" ? (!(on >= 1) || !(off >= 0) || !d.start ? L("حدّد أيام العمل وأيام الراحة وأول يوم عمل", "Set days on, days off and the first day on") : "")
+      : !days.length ? L("اختر يومًا واحدًا على الأقل", "Pick at least one day") : "";
+    if (err) { flash("err", err); return render(); }
+    var e = id ? D.roster.filter(function (x) { return x.id === id; })[0] : { id: D.seq.d++ };
+    if (!e) return render();
+    Object.assign(e, { uid: u ? u.id : null, name: u ? "" : name, phone: ph, mode: d.mode === "cycle" ? "cycle" : "week", days: days, on: on || 1, off: off >= 0 ? off : 0, start: d.start || today() });
+    if (!id) D.roster.push(e);
+    log(id ? "duty_edit" : "duty_add", null, name); save();
+    flash("ok", (id ? L("تم حفظ مداومة ", "Saved: ") : L("تمت إضافة ", "Added: ")) + name + " — " + (dutyOn(e) ? L("مداوم اليوم", "on duty today") : L("غير مداوم اليوم", "off today")));
+    render();
+  }
+
   /* ---------- الحسابات + سجل العمليات (مدير النظام) ---------- */
   function auditTable(list, withDoc) {
     return '<div class="tw"><table class="audit"><thead><tr><th>' + L("الوقت", "Time") + "</th><th>" + L("المستخدم", "User") + "</th><th>" + L("العملية", "Action") + "</th>" +
@@ -963,6 +1067,7 @@
     else if (kind === "req") doReq(f);
     else if (kind === "pro") doPro(f, ev.submitter);
     else if (kind === "decide") doDecide(f, ev.submitter);
+    else if (kind === "duty") doDuty(f);
     else if (kind === "qact") { if (ev.submitter && ev.submitter.value === "done") doDone(f); else doFollowup(f); }
     else if (kind === "filter") {
       var d = formData(f), qs = Object.keys(d).filter(function (k) { return d[k]; }).map(function (k) { return encodeURIComponent(k) + "=" + encodeURIComponent(d[k]); }).join("&");
@@ -975,6 +1080,7 @@
     if (t.id === "f_kind") toggleKind();
     if (t.id === "f_time_from") syncPermTime();
     if (t.id === "f_date_from") syncLate();
+    if (t.name === "mode" && t.form && t.form.classList.contains("dform")) t.form.dataset.mode = t.value;
     if (t.dataset.role) { var u = userById(+t.dataset.role); if (u && u.role !== "s") { u.role = t.value; save(); flash("ok", L("تم تحديث صلاحية ", "Role updated: ") + u.full_name); render(); } }
     if (t.dataset.uf) {
       var u2 = userById(+t.dataset.uid), v = t.value.trim();
@@ -1003,15 +1109,21 @@
     else if (act === "print-req") { var pr = reqById(+b.dataset.id); if (pr && u0 && canSee(u0, pr)) { closeModal(); printReq(pr); } }
     else if (act === "print-list") printList();
     else if (act === "open-req") { var orq = reqById(+b.dataset.id); if (orq && u0 && canSee(u0, orq)) openReq(orq); }
-    else if (act === "duty" && u0 && u0.role === "a") { u0.duty = onDuty(u0) ? "" : today(); save(); render(); }
+    else if (act === "duty-del" && u0 && u0.role === "s") {
+      var D0 = load(), de = D0.roster.filter(function (x) { return x.id === +b.dataset.id; })[0];
+      if (de && confirm(L("حذف " + dutyName(de) + " من جدول المداومة؟", "Remove " + dutyName(de) + " from the duty roster?"))) {
+        D0.roster = D0.roster.filter(function (x) { return x !== de; });
+        log("duty_del", null, dutyName(de)); save(); flash("ok", L("تم الحذف من جدول المداومة: ", "Removed from the roster: ") + dutyName(de)); render();
+      }
+    }
     else if (act === "stat-ok" && u0 && "ams".indexOf(u0.role) >= 0) {
       load().statOk[b.dataset.key] = { by: u0.id, at: new Date().toISOString() };
       log("stat", null, T(PER[b.dataset.key.split("|")[0]] || ["", ""])); save(); flash("ok", L("تم اعتماد الإحصائية", "Statistics approved")); render();
     }
     else if (act === "remind") {
-      var rq = reqById(+b.dataset.id), sel = document.getElementById("rm" + b.dataset.id), adm = sel && userById(+sel.value);
-      if (!rq || !adm || !u0 || rq.user_id !== u0.id) return;
-      log("remind", rq.id, adm.full_name); save();
+      var rq = reqById(+b.dataset.id), sel = document.getElementById("rm" + b.dataset.id), adm = sel && load().roster.filter(function (x) { return x.id === +sel.value; })[0];
+      if (!rq || !adm || !dutyPhone(adm) || !u0 || rq.user_id !== u0.id) return;
+      log("remind", rq.id, dutyName(adm)); save();
       window.open(remindLink(rq, adm), "_blank", "noopener");
     }
     else if (act === "reveal") {

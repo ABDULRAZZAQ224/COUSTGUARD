@@ -245,3 +245,18 @@ table.audit small{display:block;opacity:.75;font-size:12px}
 body.app-bg .modal-box{background:#0b2547;color:#e2e8f0;border:1px solid rgba(255,255,255,.15)}
 body.app-bg .modal-box .card{margin:0 0 10px}
 body.app-bg .modal .x{background:rgba(255,255,255,.15);color:#fff}
+
+/* ===== جدول المداومة ===== */
+.dform[data-mode=week] .cyc{display:none}.dform[data-mode=cycle] .wk{display:none}
+.days{display:flex;flex-wrap:wrap;gap:6px 16px;margin:6px 0}
+.days label{display:flex;align-items:center;gap:5px;margin:0;font-weight:600;cursor:pointer}
+.days input{width:auto;margin:0;accent-color:var(--or)}
+.row3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+@media(max-width:560px){.row3{grid-template-columns:1fr}}
+table.dgrid th,table.dgrid td{text-align:center;padding:5px 6px;font-size:13px;white-space:nowrap}
+table.dgrid td:first-child,table.dgrid th:first-child{text-align:start}
+table.dgrid th.td{background:var(--or)}
+table.dgrid td.on{color:#16a34a;font-size:17px;background:rgba(22,163,74,.14)}
+table.dgrid td.off{opacity:.4}
+.pbtn.del{color:#fecaca;border-color:rgba(248,113,113,.5)}
+.duty a.pbtn{text-decoration:none;color:#fff!important}

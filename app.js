@@ -156,7 +156,7 @@
       R({ id: 10, user_id: 6, kind: "emer", date_from: d(-6), date_to: d(-5), notes: "ظرف عائلي", secret: "5678", created: at(0, 7) }),
       R({ id: 11, user_id: 5, kind: "med", date_from: d(-9), date_to: d(-8), med: medImg, status: "a", decided_by: 8, decided_at: at(-3, 11), dec_role: "clerk", done_by: 4, done_at: at(-2, 9), created: at(-4, 8) })
     ];
-    // جدول المداومة التجريبي: إداريّان بالتناوب (يوم عمل ويوم راحة) + مدير النظام بأيام ثابتة
+    // زام الإداري التجريبي: إداريّان بالتناوب (يوم عمل ويوم راحة) + مدير النظام بأيام ثابتة
     var roster = [
       { id: 1, uid: 4, name: "", phone: "", mode: "cycle", days: [], on: 1, off: 1, start: d(0) },
       { id: 2, uid: 8, name: "", phone: "", mode: "cycle", days: [], on: 1, off: 1, start: d(1) },
@@ -172,7 +172,7 @@
     if (!db || !db.users) { db = seed(); save(); }
     if (!db.statOk) db.statOk = {};
     if (!db.seq.out) db.seq.out = {};
-    if (!db.roster) { // ترقية: أنشئ جدول المداومة من الإداريين الحاليين
+    if (!db.roster) { // ترقية: أنشئ زام الإداري من الإداريين الحاليين
       var t0 = today(), t1 = ymd(addDays(new Date(), 1));
       db.roster = db.users.filter(function (u) { return u.role === "a"; }).map(function (u, i) {
         return { id: i + 1, uid: u.id, name: "", phone: "", mode: "cycle", days: [], on: 1, off: 1, start: u.duty === t0 ? t0 : t1 };
@@ -196,7 +196,7 @@
   function userById(id) { return load().users.filter(function (u) { return u.id === id; })[0] || null; }
   function uname(id) { var u = userById(id); return u ? u.full_name : "—"; }
   function nameLine(u) { return u.rank ? u.rank + " / " + u.full_name : u.full_name; }
-  /* ---------- جدول المداومة: مدير النظام يحدد المداومين وآلية العمل، والنظام يحسب تلقائيًا ---------- */
+  /* ---------- زام الإداري: مدير النظام يحدد المداومين وآلية العمل، والنظام يحسب تلقائيًا ---------- */
   var WD = [["الأحد", "Sun"], ["الإثنين", "Mon"], ["الثلاثاء", "Tue"], ["الأربعاء", "Wed"], ["الخميس", "Thu"], ["الجمعة", "Fri"], ["السبت", "Sat"]];
   function dutyName(e) { var u = e.uid ? userById(e.uid) : null; return u ? u.full_name : e.name; }
   function dutyPhone(e) { var u = e.uid ? userById(e.uid) : null; return e.phone || (u ? u.phone : ""); }
@@ -229,7 +229,7 @@
     ok: ["اعتماد الطلب", "Request approved"], ok_late: ["اعتماد طلب متأخر", "Late request approved"], rej: ["رفض الطلب", "Request rejected"],
     follow: ["طلب متابعة", "Follow-up requested"], done: ["تم عمل اللازم", "Completed"], print: ["طباعة الطلب", "Request printed"],
     reveal: ["عرض الرقم السري", "Secret number viewed"], remind: ["تذكير الإداري", "Clerk reminded"], stat: ["اعتماد الإحصائية", "Statistics approved"],
-    duty_add: ["إضافة إلى جدول المداومة", "Added to duty roster"], duty_edit: ["تعديل جدول المداومة", "Duty roster edited"], duty_del: ["حذف من جدول المداومة", "Removed from duty roster"]
+    duty_add: ["إضافة إلى زام الإداري", "Added to duty roster"], duty_edit: ["تعديل زام الإداري", "Duty roster edited"], duty_del: ["حذف من زام الإداري", "Removed from duty roster"]
   };
   function log(act, rid, x) {
     var u = me();
@@ -304,7 +304,7 @@
       "⚠️ Demo version — data is stored in this browser only. Do not enter real secret numbers or personal data.") +
       '</span><button type="button" data-act="reset">' + L("إعادة ضبط البيانات التجريبية", "Reset demo data") + "</button></div>";
     var links = [["my", L("طلباتي", "My requests"), "emhoas"], ["pro", L("اعتماد المهنيين", "Professionals approval"), "ms"],
-      ["review", L("متابعة الطلبات", "Requests overview"), "hos"], ["queue", L("اعتماد وتنفيذ الطلبات", "Approve & execute"), "as"], ["stats", L("الإحصائيات", "Statistics"), "mhoas"], ["duty", L("جدول المداومة", "Duty roster"), "s"]];
+      ["review", L("متابعة الطلبات", "Requests overview"), "hos"], ["queue", L("اعتماد وتنفيذ الطلبات", "Approve & execute"), "as"], ["stats", L("الإحصائيات", "Statistics"), "mhoas"], ["duty", L("زام الإداري", "Duty roster"), "s"]];
     h += '<nav class="nav noprint">' + links.filter(function (l) { return l[2].indexOf(u.role) >= 0; }).map(function (l) {
       return '<a href="#/' + l[0] + '"' + (l[0] === path ? ' class="on"' : "") + ">" + l[1] + "</a>";
     }).join("") + "</nav>";
@@ -712,11 +712,11 @@
   /* الإداري: اعتماد الطلبات في موعدها + تنفيذ كل الطلبات المعتمدة */
   function viewQueue(q, u) {
     var mine = dutyOf(u), nd = mine && !dutyOn(mine) ? nextDuty(mine) : null, tl = dutyToday();
-    var duty = '<div class="duty"><span>' + (u.role === "a" ? (mine ? L("حالتك اليوم حسب جدول المداومة: ", "Today, per the duty roster: ") +
+    var duty = '<div class="duty"><span>' + (u.role === "a" ? (mine ? L("حالتك اليوم حسب زام الإداري: ", "Today, per the duty roster: ") +
         (dutyOn(mine) ? "🟢 <b>" + L("مداوم", "On duty") + "</b>" : "⚪ <b>" + L("غير مداوم", "Off duty") + "</b>" + (nd ? L(" — مداومتك القادمة: ", " — next duty: ") + T(WD[nd.getDay()]) + " " + ymd(nd) : ""))
-        : L("لست مُدرجًا في جدول المداومة", "You are not on the duty roster")) + "<br>" : "") +
+        : L("لست مُدرجًا في زام الإداري", "You are not on the duty roster")) + "<br>" : "") +
       L("المداومون اليوم: ", "On duty today: ") + "<b>" + (tl.length ? tl.map(function (e) { return esc(dutyName(e)); }).join(L("، ", ", ")) : "—") + "</b></span>" +
-      (u.role === "s" ? '<a class="pbtn" href="#/duty">' + L("إدارة جدول المداومة", "Manage duty roster") + "</a>" : "") + "</div>";
+      (u.role === "s" ? '<a class="pbtn" href="#/duty">' + L("إدارة زام الإداري", "Manage duty roster") + "</a>" : "") + "</div>";
     return listView("queue", u, q, load().reqs.filter(function (r) { return !r.auto_rejected; }), "w", [
       ["w", L("بانتظار اعتمادك", "Awaiting your approval"), function (r) { return stage(r) === "clerk"; }, true],
       ["n", L("معتمد بانتظار التنفيذ", "Approved — to execute"), function (r) { return stage(r) === "exec" && !r.followups.length; }, true],
@@ -973,14 +973,14 @@
       '<div class="ft">' + L("تقرير آلي من نظام الطلبات الإدارية - قسم الكهرباء والإلكترونيات - للاستخدام الداخلي — ", "Automatic report — Administrative Requests System - Electrical & Electronics Dept. - internal use — ") + CREDIT + "</div>";
   }
 
-  /* ---------- جدول المداومة (مدير النظام) ---------- */
+  /* ---------- زام الإداري (مدير النظام) ---------- */
   function dutyForm(e) {
     var isNew = !e;
     e = e || { id: "", uid: null, name: "", phone: "", mode: "week", days: [0, 1, 2, 3, 4], on: 1, off: 1, start: today() };
     var nd = !isNew && !dutyOn(e) ? nextDuty(e) : null;
     var opt = function (v, t, on) { return '<option value="' + v + '"' + (on ? " selected" : "") + ">" + t + "</option>"; };
     return '<form class="box dform" data-f="duty" data-id="' + e.id + '" data-mode="' + e.mode + '">' +
-      (isNew ? '<div class="fh"><b>➕ ' + L("إضافة شخص إلى جدول المداومة", "Add a person to the roster") + "</b></div>"
+      (isNew ? '<div class="fh"><b>➕ ' + L("إضافة شخص إلى زام الإداري", "Add a person to the roster") + "</b></div>"
         : '<div class="fh"><b>' + (dutyOn(e) ? "🟢 " : "⚪ ") + esc(dutyName(e)) + '</b><button type="button" class="pbtn del" data-act="duty-del" data-id="' + e.id + '">🗑 ' + L("حذف من الجدول", "Remove") + "</button></div>" +
           '<p class="sub">' + esc(dutyRule(e)) + " — " + (dutyOn(e) ? L("مداوم اليوم", "on duty today") : L("غير مداوم اليوم", "off today") + (nd ? L("، مداومته القادمة ", ", next duty ") + T(WD[nd.getDay()]) + " " + ymd(nd) : "")) + "</p>") +
       '<div class="row"><div class="fld"><label>' + L("من حسابات النظام", "System account") + '</label><select name="uid">' + opt("", L("— اسم من خارج النظام —", "— not a system user —"), !e.uid) +
@@ -1006,7 +1006,7 @@
       }).join("") + "</tr></thead><tbody>" + R.map(function (e) {
         return "<tr><td>" + esc(dutyName(e)) + "</td>" + days.map(function (d) { return dutyOn(e, d) ? '<td class="on">●</td>' : '<td class="off">—</td>'; }).join("") + "</tr>";
       }).join("") + "</tbody></table></div>";
-    return "<h2>" + L("جدول المداومة", "Duty roster") + '</h2><p class="sub">' +
+    return "<h2>" + L("زام الإداري", "Duty roster") + '</h2><p class="sub">' +
       L("حدّد الأشخاص المداومين وآلية عمل كل شخص، والنظام يحسب تلقائيًا من المداوم ومن غير المداوم في كل يوم. المداوم اليوم يظهر أولًا في تذكير الواتساب.",
         "Set who is on the roster and each person's work pattern; the system works out automatically who is on duty each day. Today's on-duty people come first in WhatsApp reminders.") + "</p>" +
       '<div class="tiles"><div><b>' + on.length + "</b>" + L("مداوم اليوم", "On duty today") + "</div><div><b>" + (R.length - on.length) + "</b>" + L("غير مداوم اليوم", "Off today") +
@@ -1120,9 +1120,9 @@
     else if (act === "open-req") { var orq = reqById(+b.dataset.id); if (orq && u0 && canSee(u0, orq)) openReq(orq); }
     else if (act === "duty-del" && u0 && u0.role === "s") {
       var D0 = load(), de = D0.roster.filter(function (x) { return x.id === +b.dataset.id; })[0];
-      if (de && confirm(L("حذف " + dutyName(de) + " من جدول المداومة؟", "Remove " + dutyName(de) + " from the duty roster?"))) {
+      if (de && confirm(L("حذف " + dutyName(de) + " من زام الإداري؟", "Remove " + dutyName(de) + " from the duty roster?"))) {
         D0.roster = D0.roster.filter(function (x) { return x !== de; });
-        log("duty_del", null, dutyName(de)); save(); flash("ok", L("تم الحذف من جدول المداومة: ", "Removed from the roster: ") + dutyName(de)); render();
+        log("duty_del", null, dutyName(de)); save(); flash("ok", L("تم الحذف من زام الإداري: ", "Removed from the roster: ") + dutyName(de)); render();
       }
     }
     else if (act === "stat-ok" && u0 && "ams".indexOf(u0.role) >= 0) {

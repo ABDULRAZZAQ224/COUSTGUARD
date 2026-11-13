@@ -12,18 +12,24 @@
   var LIMIT = 4;          // الحد الأعلى للاستئذانات بالشهر
   var PERM_MIN = 180;     // الاستئذان 3 ساعات بالضبط
   var LATE_DAYS = 2;      // بعد يومين من تاريخ الطلب: يوصل عادي للإداري مع تنبيه احتمال الرفض
-  var LATE_KINDS = ["perm", "leave", "emer", "med", "pleave"];
-  var LEAVE_KINDS = ["leave", "emer", "pleave", "pexit"]; // تنبيه الحضور للقسم بعد الإجازة
+  var LATE_KINDS = ["perm", "leave", "emer", "med", "pleave", "ext"];
+  var LEAVE_KINDS = ["leave", "emer", "pleave", "pexit", "ext"]; // تنبيه الحضور للقسم بعد الإجازة
+  var EXT_BASE = ["leave", "emer", "med", "pleave", "pexit", "ext"];  // الإجازات القابلة للتمديد
   var PRO_KINDS = ["pleave", "pexit"];                     // يعتمدها مسؤول المهنيين
   var KINDS = {
     perm: ["استئذان", "Permission"], leave: ["إجازة", "Leave"], emer: ["إجازة عارضة (طارئة)", "Casual (emergency) leave"],
     med: ["اعتماد طبية (إجازة مرضية)", "Medical certificate (sick leave)"], meet: ["طلب مقابلة", "Meeting request"],
-    pleave: ["إجازة مهنيين", "Professionals leave"], pexit: ["إذن مغادرة (مهنيين)", "Exit permit (professionals)"]
+    pleave: ["إجازة مهنيين", "Professionals leave"], pexit: ["إذن مغادرة (مهنيين)", "Exit permit (professionals)"],
+    ext: ["تمديد إجازة", "Leave extension"]
   };
+  // اسم التمديد حسب نوع الإجازة الأصلية
+  var EXTN = { leave: ["تمديد إجازة", "Leave extension"], emer: ["تمديد إجازة عارضة", "Casual leave extension"], med: ["تمديد إجازة مرضية", "Sick leave extension"],
+               pleave: ["تمديد إجازة مهنيين", "Professionals leave extension"], pexit: ["تمديد إذن مغادرة (مهنيين)", "Exit permit extension (professionals)"] };
   // أقسام الطلبات: كل قسم بخانته
   var CATS = {
     perm: { t: ["الاستئذانات", "Permissions"], one: ["استئذان", "Permission"], icon: "⏱️", kinds: ["perm"], d: ["3 ساعات بالضبط — 4 في الشهر كحد أقصى", "Exactly 3 hours — max 4 a month"] },
     leave: { t: ["الإجازات", "Leaves"], one: ["إجازة", "Leave"], icon: "🏖️", kinds: ["leave", "emer"], d: ["إجازة اعتيادية أو عارضة", "Regular or casual leave"] },
+    ext: { t: ["التمديدات", "Extensions"], one: ["تمديد إجازة", "Leave extension"], icon: "⏩", kinds: ["ext"], d: ["تمديد آخر إجازة إلى تاريخ جديد", "Extend your last leave to a new date"] },
     med: { t: ["الطبيات", "Medical"], one: ["طبية", "Medical"], icon: "🩺", kinds: ["med"], d: ["اعتماد إجازة مرضية مع صورة", "Sick leave with a photo"] },
     meet: { t: ["المقابلات", "Meetings"], one: ["مقابلة", "Meeting"], icon: "🤝", kinds: ["meet"], d: ["طلب مقابلة أحد المسؤولين", "Request to meet an official"] },
     pro: { t: ["المهنيين", "Professionals"], one: ["مهنيين", "Professionals"], icon: "🛠️", kinds: ["pleave", "pexit"], d: ["إجازة أو إذن مغادرة للمهنيين", "Leave or exit permit for professionals"] }
@@ -65,7 +71,10 @@
   function today() { return ymd(new Date()); }
   function toMin(t) { var p = t.split(":"); return +p[0] * 60 + +p[1]; }
   function fromMin(m) { return pad(Math.floor(m / 60)) + ":" + pad(m % 60); }
-  function isPro(r) { return PRO_KINDS.indexOf(r.kind) >= 0; }
+  function isPro(r) { return PRO_KINDS.indexOf(r.kind) >= 0 || (r.kind === "ext" && PRO_KINDS.indexOf(r.ext_kind) >= 0); }
+  function KR(r) { return r.kind === "ext" ? T(EXTN[r.ext_kind] || KINDS.ext) : K(r.kind); }
+  function nextDay(s) { return ymd(addDays(parseDate(s), 1)); }
+  function spanDays(a, b) { return Math.round((parseDate(b) - parseDate(a)) / 864e5) + 1; }
   function daysTxt(n) { return L(n === 1 ? "يوم واحد" : n === 2 ? "يومان" : n + (n <= 10 ? " أيام" : " يومًا"), n + (n === 1 ? " day" : " days")); }
 
   /* ---------- التأخير في التقديم + تنبيه الإجازة ---------- */
@@ -472,7 +481,8 @@
     med: ["date_from", "date_to", "medical_image"],
     meet: ["date_from", "time_from", "time_to", "meet_with", "meet_reason"],
     pleave: ["date_from", "date_to"],
-    pexit: ["depart_date", "date_from", "date_to"]
+    pexit: ["depart_date", "date_from", "date_to"],
+    ext: ["date_from", "date_to"]
   };
   var OPTIONAL = ["depart_date", "date_to", "perm_period", "time_from", "time_to", "meet_with", "meet_reason", "medical_image"];
   var myState = { errs: {}, val: {} };
@@ -491,6 +501,7 @@
     var list = "<h2>" + L("طلباتي", "My requests") + "</h2>" + catBar("my", { c: c }, all) + listTools(items.length) +
       (items.length ? items.map(myCard).join("") : "<p>" + L("لا توجد طلبات في هذا القسم.", "No requests in this section.") + "</p>");
     if (!nw) return head + list;
+    if (nw === "ext") return head + extForm(u, e, v, c) + list;
     var C = CATS[nw], kind = v.kind && catOf(v.kind) === nw ? v.kind : C.kinds[0], sub = {};
     C.kinds.forEach(function (k) { sub[k] = K(k); });
     return head +
@@ -514,13 +525,68 @@
       '<p class="sub">' + L("في النسخة التجريبية اكتب أي رقم (مثلًا 1234) — لا تكتب رقمك الحقيقي.", "In the demo, type any number (e.g. 1234) — never your real one.") + "</p>" +
       '<p><button class="p">' + L("إرسال الطلب", "Submit request") + "</button></p></form>" + list;
   }
+  /* ---------- تمديد الإجازة: تُعبّأ بيانات آخر إجازة تلقائيًا، والموظف يختار تاريخ نهاية التمديد فقط ---------- */
+  function extBases(uid) {
+    return load().reqs.filter(function (r) { return r.user_id === uid && EXT_BASE.indexOf(r.kind) >= 0 && r.status !== "r"; })
+      .sort(function (a, b) { var x = a.date_to || a.date_from, y = b.date_to || b.date_from; return x < y ? 1 : x > y ? -1 : byCreated(a, b); }).slice(0, 6);
+  }
+  function extInfo(b) {
+    if (!b) return "";
+    var end = b.date_to || b.date_from;
+    return "<b>" + L("الإجازة الأصلية: ", "Original leave: ") + esc(KR(b)) + "</b><br>" + L("رقم الصادر: ", "Outgoing no.: ") + esc(b.ref) +
+      " — " + L("من ", "from ") + esc(b.date_from) + L(" إلى ", " to ") + esc(end) + " (" + daysTxt(spanDays(b.date_from, end)) + ")" +
+      " — " + L("الحالة: ", "Status: ") + pill(b, "my")[1];
+  }
+  function extForm(u, e, v, c) {
+    var top = '<form class="box" data-f="req"><div class="fh"><b>⏩ ' + L("تمديد إجازة", "Leave extension") + '</b><a href="' + link("my", { c: c }) + '">✕ ' + L("إغلاق", "Close") + "</a></div>";
+    var bases = extBases(u.id);
+    if (!bases.length) return top + '<p class="msg">' + L("لا توجد لديك إجازة سابقة يمكن تمديدها.", "You have no previous leave to extend.") + "</p></form>";
+    var b = bases.filter(function (x) { return x.id === +v.ext_of; })[0] || bases[0], from = nextDay(b.date_to || b.date_from);
+    return top + '<input type="hidden" name="kind" id="f_kind" value="ext">' +
+      '<p class="sub">' + L("تُعبّأ بيانات آخر إجازة لك تلقائيًا، واختر فقط تاريخ نهاية التمديد.", "Your last leave is filled in automatically — just choose the new end date.") + "</p>" +
+      '<div class="fld"><label for="f_ext_of">' + L("الإجازة المراد تمديدها", "Leave to extend") + '</label><select name="ext_of" id="f_ext_of">' + bases.map(function (x) {
+        return '<option value="' + x.id + '"' + (x === b ? " selected" : "") + ">" + esc(KR(x)) + " — " + esc(x.date_from) + (x.date_to ? L(" إلى ", " to ") + esc(x.date_to) : "") + " — " + esc(x.ref) + "</option>";
+      }).join("") + "</select>" + errHtml(e, "ext_of") + "</div>" +
+      '<div class="extbox" id="ext-box">' + extInfo(b) + "</div>" +
+      '<div class="row">' + field("date_from", L("يبدأ التمديد من (تلقائيًا)", "Extension starts (automatic)"), { type: "date", readonly: "" }, e, from) +
+      field("date_to", L("تمديد إلى تاريخ", "Extend until"), { type: "date", required: "", min: from }, e, v.date_to) + "</div>" +
+      '<p class="ok" id="ext-days"></p>' +
+      '<p class="sub" id="route-hint">' + L("يعتمد الإداريُّ هذا الطلب.", "The administrative clerk approves this request.") + "</p>" +
+      '<p class="sub" id="pro-hint" hidden>' + L("يُحال هذا الطلب إلى مسؤول المهنيين لاعتماده.", "This request goes to the Professionals Officer for approval.") + "</p>" +
+      '<p class="late" id="late-hint" hidden></p>' +
+      '<p class="note-l" id="leave-hint">' + leaveNote() + "</p>" +
+      field("notes", L("سبب التمديد / ملاحظات", "Reason / notes"), { type: "textarea", rows: "3" }, e, v.notes) +
+      field("secret", L("الرقم السري لنظام جابر", "Jaber system secret number"), { type: "password", autocomplete: "off", required: "" }, e) +
+      '<p class="sub">' + L("في النسخة التجريبية اكتب أي رقم (مثلًا 1234) — لا تكتب رقمك الحقيقي.", "In the demo, type any number (e.g. 1234) — never your real one.") + "</p>" +
+      '<p><button class="p">' + L("إرسال طلب التمديد", "Submit extension") + "</button></p></form>";
+  }
+  function extPro() { var s0 = document.getElementById("f_ext_of"), b = s0 && reqById(+s0.value); return !!(b && isPro(b)); }
+  function syncExt() {
+    var s0 = document.getElementById("f_ext_of"); if (!s0) return;
+    var b = reqById(+s0.value), df = document.getElementById("f_date_from"), dt = document.getElementById("f_date_to"); if (!b) return;
+    df.value = nextDay(b.date_to || b.date_from); dt.min = df.value;
+    document.getElementById("ext-box").innerHTML = extInfo(b);
+    var n = dt.value && dt.value >= df.value ? spanDays(df.value, dt.value) : 0;
+    document.getElementById("ext-days").textContent = n ? L("مدة التمديد: ", "Extension length: ") + daysTxt(n) + L(" — حتى ", " — until ") + dt.value : "";
+    var pro = isPro(b);
+    document.getElementById("pro-hint").hidden = !pro; document.getElementById("route-hint").hidden = pro;
+    syncLate();
+  }
+  // سطر يربط التمديد بالإجازة الأصلية
+  function extLine(r) {
+    if (r.kind !== "ext") return "";
+    var b = reqById(r.ext_of), n = r.date_to ? spanDays(r.date_from, r.date_to) : 0;
+    return '<p class="ext">⏩ ' + L("تمديد للإجازة رقم الصادر ", "Extends request no. ") +
+      (b ? '<button type="button" class="lnk inl" data-act="open-req" data-id="' + b.id + '">' + esc(b.ref) + "</button> (" + esc(KR(b)) + L(" من ", " from ") + esc(b.date_from) + L(" إلى ", " to ") + esc(b.date_to || b.date_from) + ")" : "—") +
+      (n ? " — " + L("مدة التمديد: ", "extension: ") + daysTxt(n) : "") + "</p>";
+  }
   function refLine(r) {
     return '<p class="ref">' + L("رقم الصادر: ", "Outgoing no.: ") + "<b>" + esc(r.ref) + "</b> — " + L("تاريخ التقديم: ", "Submitted: ") + ymdhm(r.created) + "</p>";
   }
   function myCard(r) {
     var st = pill(r, "my"), sg = stage(r);
-    return '<div class="card"><div class="ch"><h3>' + K(r.kind) + (r.perm_period ? " (" + T(PERIODS[r.perm_period]) + ")" : "") + "</h3>" + chr(r, st) + "</div>" +
-      refLine(r) + "<p>" + dates(r) + "</p>" + meetLine(r) + lateBox(r) + leaveBox(r) +
+    return '<div class="card"><div class="ch"><h3>' + KR(r) + (r.perm_period ? " (" + T(PERIODS[r.perm_period]) + ")" : "") + "</h3>" + chr(r, st) + "</div>" +
+      refLine(r) + "<p>" + dates(r) + "</p>" + extLine(r) + meetLine(r) + lateBox(r) + leaveBox(r) +
       (r.status === "r" ? '<p class="err">' + L("سبب الرفض: ", "Rejection reason: ") + esc(rejText(r)) + "</p>" : "") +
       r.followups.map(function (f, i) { return '<p class="fu">' + L("متابعة ", "Follow-up ") + (i + 1) + ": " + esc(f.note) + " — " + esc(uname(f.by)) + "</p>"; }).join("") +
       (r.med ? '<p><a href="#" data-act="med" data-id="' + r.id + '">' + L("صورة الطبية", "Medical photo") + "</a></p>" : "") +
@@ -556,9 +622,9 @@
   }
   function remindLink(r, e) {
     var emp = userById(r.user_id) || {}, admin = { full_name: dutyName(e), phone: dutyPhone(e) };
-    var msg = L("السلام عليكم " + admin.full_name + "،\nتذكير بالطلب رقم الصادر " + r.ref + " (" + K(r.kind) + ") للموظف " + emp.full_name + " بتاريخ " + r.date_from +
+    var msg = L("السلام عليكم " + admin.full_name + "،\nتذكير بالطلب رقم الصادر " + r.ref + " (" + KR(r) + ") للموظف " + emp.full_name + " بتاريخ " + r.date_from +
       (r.date_to ? " إلى " + r.date_to : "") + "\nحالة الطلب: " + pill(r, "my")[1] + "\nيرجى الاطلاع واتخاذ اللازم، وشكرًا.\n\nنظام الطلبات - قسم الكهرباء والإلكترونيات",
-      "Hello " + admin.full_name + ",\nA reminder about request no. " + r.ref + " (" + K(r.kind) + ") for " + emp.full_name + " dated " + r.date_from +
+      "Hello " + admin.full_name + ",\nA reminder about request no. " + r.ref + " (" + KR(r) + ") for " + emp.full_name + " dated " + r.date_from +
       (r.date_to ? " to " + r.date_to : "") + "\nStatus: " + pill(r, "my")[1] + "\nPlease review and take the necessary action. Thank you.\n\nRequests System - Electrical & Electronics Dept.");
     return "https://wa.me/965" + encodeURIComponent(admin.phone) + "?text=" + encodeURIComponent(msg);
   }
@@ -570,21 +636,22 @@
   }
   function toggleKind() {
     var k = document.getElementById("f_kind"); if (!k) return;
-    var show = SHOW[k.value] || [], pro = PRO_KINDS.indexOf(k.value) >= 0;
+    var show = SHOW[k.value] || [], pro = k.value === "ext" ? extPro() : PRO_KINDS.indexOf(k.value) >= 0;
     OPTIONAL.forEach(function (n) { var el = document.querySelector('[data-fld="' + n + '"]'); if (el) el.hidden = show.indexOf(n) < 0; });
-    var lf = document.querySelector('label[for="f_date_from"]'); if (lf) lf.textContent = k.value === "pexit" ? L("تاريخ الإجازة (من)", "Leave from") : L("التاريخ / من تاريخ", "Date / from");
+    var lf = k.value !== "ext" && document.querySelector('label[for="f_date_from"]'); if (lf) lf.textContent = k.value === "pexit" ? L("تاريخ الإجازة (من)", "Leave from") : L("التاريخ / من تاريخ", "Date / from");
     var tt = document.getElementById("f_time_to"), lt = document.querySelector('label[for="f_time_to"]');
     if (tt) { tt.readOnly = k.value === "perm"; lt.textContent = k.value === "perm" ? L("إلى الساعة (تلقائيًا: 3 ساعات)", "To (automatic: 3 hours)") : L("إلى الساعة", "To"); }
     var ph = document.getElementById("pro-hint"); if (ph) ph.hidden = !pro;
     var rh = document.getElementById("route-hint"); if (rh) rh.hidden = pro;
     var lh = document.getElementById("leave-hint"); if (lh) lh.hidden = LEAVE_KINDS.indexOf(k.value) < 0;
     syncPermTime(); syncLate();
+    if (k.value === "ext") syncExt();
   }
   function syncLate() {
     var k = document.getElementById("f_kind"), df = document.getElementById("f_date_from"), lh = document.getElementById("late-hint");
     if (!k || !df || !lh) return;
     var n = lateBy(k.value, df.value);
-    lh.hidden = !n; lh.textContent = n ? lateForm(n, PRO_KINDS.indexOf(k.value) >= 0) : "";
+    lh.hidden = !n; lh.textContent = n ? lateForm(n, k.value === "ext" ? extPro() : PRO_KINDS.indexOf(k.value) >= 0) : "";
   }
   function syncPermTime() {
     var k = document.getElementById("f_kind"), tf = document.getElementById("f_time_from"), tt = document.getElementById("f_time_to");
@@ -595,7 +662,13 @@
     var d = formData(form), e = {}, u = me(), show = SHOW[d.kind];
     if (!show) e.kind = L("اختر نوع الطلب", "Choose a request type");
     else OPTIONAL.forEach(function (n) { if (show.indexOf(n) < 0) d[n] = ""; });
-    var file = show && show.indexOf("medical_image") >= 0 ? form.medical_image.files[0] : null;
+    var file = show && show.indexOf("medical_image") >= 0 ? form.medical_image.files[0] : null, base = null;
+    if (d.kind === "ext") {
+      base = reqById(+d.ext_of);
+      if (!base || base.user_id !== u.id || EXT_BASE.indexOf(base.kind) < 0 || base.status === "r") { base = null; e.ext_of = L("اختر الإجازة المراد تمديدها", "Choose the leave to extend"); }
+      else d.date_from = nextDay(base.date_to || base.date_from); // بداية التمديد = اليوم التالي لنهاية الإجازة
+      if (!d.date_to) e.date_to = L("اختر تاريخ نهاية التمديد", "Choose the extension end date");
+    }
     if (!d.date_from) e.date_from = req();
     if (!d.secret) e.secret = req();
     if (d.kind === "perm") {
@@ -618,6 +691,7 @@
       var D = load(), df = parseDate(d.date_from), nowIso = new Date().toISOString();
       var r = { id: D.seq.r++, ref: "", user_id: u.id, kind: d.kind, date_from: d.date_from, date_to: d.date_to, depart_date: d.depart_date, time_from: d.time_from, time_to: d.time_to,
         meet_with: d.meet_with, meet_reason: d.meet_reason, perm_period: d.perm_period, notes: d.notes, med: img, secret: "", status: "p",
+        ext_of: base ? base.id : null, ext_kind: base ? (base.kind === "ext" ? base.ext_kind : base.kind) : "",
         pro_by: null, pro_at: null, pro_proxy: false, decided_by: null, decided_at: null, dec_role: "",
         reject_reason: "", auto_rejected: false, done_by: null, done_at: null, followups: [], created: nowIso };
       var over = r.kind === "perm" && used(u.id, df.getFullYear(), df.getMonth()) >= LIMIT;
@@ -730,7 +804,7 @@
   function reqDetails(r, u, mode) {
     var h = refLine(r);
     h += '<p class="sub">' + esc(u.job_title) + " — " + L("هاتف: ", "Phone: ") + esc(u.phone) + (mode === "queue" ? " — " + L("مدني: ", "Civil ID: ") + esc(u.civil_id) : "") + "</p>";
-    h += "<p>" + (r.perm_period ? T(PERIODS[r.perm_period]) + " — " : "") + dates(r) + "</p>" + meetLine(r) + lateBox(r) + leaveBox(r);
+    h += "<p>" + (r.perm_period ? T(PERIODS[r.perm_period]) + " — " : "") + dates(r) + "</p>" + extLine(r) + meetLine(r) + lateBox(r) + leaveBox(r);
     if (r.notes) h += "<p>" + esc(r.notes) + "</p>";
     if (r.med) h += '<p><a href="#" data-act="med" data-id="' + r.id + '">' + L("صورة الطبية", "Medical photo") + "</a></p>";
     if (r.status === "r") h += '<p class="err">' + L("السبب: ", "Reason: ") + esc(rejText(r)) + "</p>";
@@ -746,7 +820,7 @@
     var who = me() || {}, isAdm = who.role === "s";
     return items.map(function (r) {
       var u = userById(r.user_id) || {}, st = pill(r, mode), sg = stage(r), can = canAct(who, r);
-      var h = '<div class="card"><div class="ch"><h3>' + esc(u.full_name) + " — " + K(r.kind) + "</h3>" + chr(r, st) + "</div>" + reqDetails(r, u, mode);
+      var h = '<div class="card"><div class="ch"><h3>' + esc(u.full_name) + " — " + KR(r) + "</h3>" + chr(r, st) + "</div>" + reqDetails(r, u, mode);
       if (mode === "view") return h + "</div>";
       if (sg === "pro") {
         if (can) h += (isAdm ? '<p class="wait">✍️ ' + L("توقيعك هنا يكون بالنيابة عن مسؤول المهنيين (بختمك)", "You sign here on behalf of the Professionals Officer (with your stamp)") + "</p>" : "") +
@@ -779,9 +853,9 @@
       : r.done_at ? L("تم اعتماد الطلب وعمل اللازم", "Approved and completed")
       : r.followups.length ? L("يرجى المتابعة: ", "Follow-up needed: ") + r.followups[r.followups.length - 1].note
       : L("تم اعتماد الطلب وجارٍ تنفيذه", "Approved and being processed");
-    var msg = L("مرحبًا " + u.full_name + "،\nبخصوص الطلب رقم الصادر " + r.ref + " (" + K(r.kind) + ") بتاريخ " + r.date_from + (r.date_to ? " إلى " + r.date_to : "") +
+    var msg = L("مرحبًا " + u.full_name + "،\nبخصوص الطلب رقم الصادر " + r.ref + " (" + KR(r) + ") بتاريخ " + r.date_from + (r.date_to ? " إلى " + r.date_to : "") +
       ":\n" + st + "\n\nقسم الكهرباء والإلكترونيات - خفر السواحل",
-      "Hello " + u.full_name + ",\nRegarding request no. " + r.ref + " (" + K(r.kind) + ") dated " + r.date_from + (r.date_to ? " to " + r.date_to : "") +
+      "Hello " + u.full_name + ",\nRegarding request no. " + r.ref + " (" + KR(r) + ") dated " + r.date_from + (r.date_to ? " to " + r.date_to : "") +
       ":\n" + st + "\n\nElectrical & Electronics Dept. - Coast Guard");
     return "https://wa.me/965" + encodeURIComponent(u.phone) + "?text=" + encodeURIComponent(msg);
   }
@@ -848,7 +922,8 @@
     var u = userById(r.user_id) || {}, days = r.date_to ? Math.round((parseDate(r.date_to) - parseDate(r.date_from)) / 864e5) + 1 : 0;
     var rows = [
       [L("رقم الصادر", "Outgoing no."), r.ref],
-      [L("نوع الطلب", "Request type"), K(r.kind)],
+      [L("نوع الطلب", "Request type"), KR(r)],
+      r.kind === "ext" && reqById(r.ext_of) && [L("تمديد للإجازة", "Extends"), (function (b) { return L("رقم الصادر ", "No. ") + b.ref + " — " + KR(b) + L(" من ", " from ") + b.date_from + L(" إلى ", " to ") + (b.date_to || b.date_from); })(reqById(r.ext_of))],
       r.perm_period && [L("وقت الاستئذان", "Permission time"), T(PERIODS[r.perm_period])],
       r.depart_date && [L("تاريخ المغادرة", "Departure date"), r.depart_date],
       [r.kind === "pexit" ? L("تاريخ الإجازة", "Leave dates") : r.date_to ? L("الفترة", "Period") : L("التاريخ", "Date"), r.date_from + (r.date_to ? L(" إلى ", " to ") + r.date_to : "")],
@@ -863,7 +938,7 @@
       lateOf(r) && [L("تنبيه التأخير", "Late notice"), lateCard(lateOf(r)).replace(/^⚠️\s*/, "")],
       LEAVE_KINDS.indexOf(r.kind) >= 0 && r.status !== "r" && [L("تنبيه", "Notice"), leaveNote().replace(/^📌\s*/, "")]
     ].filter(Boolean);
-    var doc = letterhead() + '<div class="rt"><h1>' + L("نموذج طلب ", "Request form: ") + K(r.kind) + "</h1><p>" + L("رقم الصادر: ", "Outgoing no.: ") + esc(r.ref) + "</p></div>" +
+    var doc = letterhead() + '<div class="rt"><h1>' + L("نموذج طلب ", "Request form: ") + KR(r) + "</h1><p>" + L("رقم الصادر: ", "Outgoing no.: ") + esc(r.ref) + "</p></div>" +
       '<h3 class="sh">' + L("بيانات الموظف", "Employee details") + '</h3><table class="meta"><tr><th>' + L("الاسم", "Name") + "</th><td>" + esc(u.full_name) + "</td><th>" + L("المسمى", "Job title") + "</th><td>" + esc(u.job_title) + "</td></tr>" +
       "<tr><th>" + L("الرقم المدني", "Civil ID") + "</th><td>" + esc(u.civil_id) + "</td><th>" + L("الهاتف", "Phone") + "</th><td>" + esc(u.phone) + "</td></tr></table>" +
       '<h3 class="sh">' + L("تفاصيل الطلب", "Request details") + '</h3><table class="meta det">' + rows.map(function (x) { return "<tr><th>" + x[0] + "</th><td>" + esc(x[1]) + "</td></tr>"; }).join("") + "</table>" +
@@ -878,7 +953,7 @@
     var Lst = lastList;
     var rows = Lst.items.map(function (r, i) {
       var u = userById(r.user_id) || {}, ap = r.decided_by ? userById(r.decided_by) : null, dn = r.done_by ? userById(r.done_by) : null;
-      return "<tr><td>" + (i + 1) + "</td><td>" + esc(r.ref) + "</td><td>" + esc(u.full_name) + "<br><small>" + esc(u.job_title) + "</small></td><td>" + K(r.kind) + "</td><td>" +
+      return "<tr><td>" + (i + 1) + "</td><td>" + esc(r.ref) + "</td><td>" + esc(u.full_name) + "<br><small>" + esc(u.job_title) + "</small></td><td>" + KR(r) + "</td><td>" +
         (r.depart_date ? L("مغادرة: ", "Departure: ") + r.depart_date + "<br>" : "") + r.date_from + (r.date_to ? "<br>" + L("إلى ", "to ") + r.date_to : "") +
         (lateOf(r) ? '<br><small class="lt">⚠️ ' + L("متأخر ", "late by ") + daysTxt(lateOf(r)) + "</small>" : "") + "</td><td>" + (r.time_from ? r.time_from + (r.time_to ? " - " + r.time_to : "") : "—") + "</td><td>" +
         pill(r, "my")[1] + (r.status === "r" ? "<br><small>" + esc(rejText(r)) + "</small>" : "") + "</td><td>" +
@@ -923,10 +998,10 @@
       end = addDays(until, -1);
     }
     var D = load(), qs = D.reqs.filter(function (r) { var c = new Date(r.created); return c >= since && c < until && (!eid || r.user_id === eid); });
-    var kinds = {}, tot = { all: 0, p: 0, a: 0, r: 0 }, late = 0, emp = {}, lv = { leave: [0, 0], emer: [0, 0], med: [0, 0], pleave: [0, 0], pexit: [0, 0] };
+    var kinds = {}, tot = { all: 0, p: 0, a: 0, r: 0 }, late = 0, emp = {}, lv = { leave: [0, 0], emer: [0, 0], med: [0, 0], pleave: [0, 0], pexit: [0, 0], ext: [0, 0] };
     qs.forEach(function (r) {
       tot.all++; tot[r.status]++; if (lateOf(r)) late++;
-      kinds[K(r.kind)] = (kinds[K(r.kind)] || 0) + 1;
+      kinds[KR(r)] = (kinds[KR(r)] || 0) + 1;
       var n = uname(r.user_id), e = emp[n] || (emp[n] = { perm: 0, leave: 0, days: 0, rej: 0 });
       if (r.status === "r") { e.rej++; return; }
       if (r.kind === "perm") e.perm++;
@@ -1041,7 +1116,7 @@
       (withDoc ? "<th>" + L("الكتاب (رقم الصادر)", "Document (outgoing no.)") + "</th>" : "") + "</tr></thead><tbody>" +
       (list.length ? list.map(function (a) {
         var r = a.rid ? reqById(a.rid) : null;
-        var doc = r ? '<button type="button" class="lnk" data-act="open-req" data-id="' + r.id + '">📄 ' + esc(r.ref) + "</button><small>" + esc(uname(r.user_id)) + " — " + K(r.kind) + "</small>"
+        var doc = r ? '<button type="button" class="lnk" data-act="open-req" data-id="' + r.id + '">📄 ' + esc(r.ref) + "</button><small>" + esc(uname(r.user_id)) + " — " + KR(r) + "</small>"
           : esc(a.target && !a.rid ? a.target : "—");
         return "<tr><td>" + ymdhm(a.at) + "</td><td>" + esc(uname(a.who)) + "</td><td>" + esc(actText(a)) + "</td>" + (withDoc ? "<td>" + doc + "</td>" : "") + "</tr>";
       }).join("") : '<tr><td colspan="' + (withDoc ? 4 : 3) + '">' + L("لا توجد عمليات", "No activity") + "</td></tr>") + "</tbody></table></div>";
@@ -1083,12 +1158,13 @@
       go(f.dataset.path + (qs ? "?" + qs : ""));
     }
   });
-  app.addEventListener("input", function (ev) { if (ev.target.id === "f_time_from") syncPermTime(); if (ev.target.id === "f_date_from") syncLate(); });
+  app.addEventListener("input", function (ev) { if (ev.target.id === "f_time_from") syncPermTime(); if (ev.target.id === "f_date_from") syncLate(); if (ev.target.id === "f_date_to") syncExt(); });
   app.addEventListener("change", function (ev) {
     var t = ev.target;
     if (t.id === "f_kind") toggleKind();
     if (t.id === "f_time_from") syncPermTime();
     if (t.id === "f_date_from") syncLate();
+    if (t.id === "f_ext_of" || t.id === "f_date_to") syncExt();
     if (t.name === "mode" && t.form && t.form.classList.contains("dform")) t.form.dataset.mode = t.value;
     if (t.dataset.role) { var u = userById(+t.dataset.role); if (u && u.role !== "s") { u.role = t.value; save(); flash("ok", L("تم تحديث صلاحية ", "Role updated: ") + u.full_name); render(); } }
     if (t.dataset.uf) {

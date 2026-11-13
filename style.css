@@ -260,3 +260,8 @@ table.dgrid td.on{color:#16a34a;font-size:17px;background:rgba(22,163,74,.14)}
 table.dgrid td.off{opacity:.4}
 .pbtn.del{color:#fecaca;border-color:rgba(248,113,113,.5)}
 .duty a.pbtn{text-decoration:none;color:#fff!important}
+
+/* ===== تمديد الإجازة ===== */
+.extbox{border:1px dashed rgba(255,255,255,.35);border-radius:10px;padding:10px 12px;margin:8px 0;font-size:14px;line-height:1.8;background:rgba(255,255,255,.04)}
+.ext{font-size:14px;font-weight:700;color:#7dd3fc}
+.lnk.inl{display:inline}

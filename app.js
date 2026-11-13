@@ -499,7 +499,7 @@
       '<div class="cats">' + Object.keys(CATS).map(function (k) {
         return '<a href="' + link("my", { "new": k, c: c }) + '"' + (k === nw ? ' class="on"' : "") + "><i>" + CATS[k].icon + "</i><b>" + T(CATS[k].one) + "</b><small>" + T(CATS[k].d) + "</small></a>";
       }).join("") + "</div>";
-    var list = "<h2>" + L("طلباتي", "My requests") + "</h2>" + catBar("my", { c: c }, all) + listTools(items.length) +
+    var list = "<h2>" + L("طلباتي", "My requests") + "</h2>" + catBar("my", { c: c }, all, items.length) +
       (items.length ? items.map(myCard).join("") : "<p>" + L("لا توجد طلبات في هذا القسم.", "No requests in this section.") + "</p>");
     if (!nw) return head + list;
     if (nw === "ext") return head + extForm(u, e, v, c) + list;
@@ -599,17 +599,18 @@
     return '<div class="chr"><span class="pill ' + st[0] + '">' + st[1] + '</span><button type="button" class="pr" data-act="print-req" data-id="' + r.id + '">🖨 ' + L("طباعة", "Print") + "</button></div>";
   }
   // شريط الأقسام: الكل | الاستئذانات | الإجازات | ...
-  function catBar(path, p, list) {
+  // قائمة منسدلة للأقسام (الكل | الاستئذانات | الإجازات | ...) وبجانبها زر طباعة القائمة
+  function catBar(path, p, list, n) {
     var c = p.c || "";
-    var tabs = [["", L("الكل", "All"), list.length]].concat(Object.keys(CATS).map(function (k) {
+    var tabs = [["", L("كل الأقسام", "All sections"), list.length]].concat(Object.keys(CATS).map(function (k) {
       return [k, CATS[k].icon + " " + T(CATS[k].t), list.filter(function (r) { return catOf(r.kind) === k; }).length];
     }));
-    return '<div class="cats-bar noprint">' + tabs.map(function (t) {
-      return '<a href="' + link(path, Object.assign({}, p, { c: t[0] })) + '"' + (t[0] === c ? ' class="on"' : "") + ">" + t[1] + " <span>" + t[2] + "</span></a>";
-    }).join("") + "</div>";
+    return '<div class="cats-bar noprint"><label for="cat-sel">' + L("القسم:", "Section:") + '</label><select id="cat-sel" class="cat-sel" data-nav="1">' + tabs.map(function (t) {
+      return '<option value="' + link(path, Object.assign({}, p, { c: t[0] })) + '"' + (t[0] === c ? " selected" : "") + ">" + t[1] + " (" + t[2] + ")</option>";
+    }).join("") + "</select>" + listTools(n) + "</div>";
   }
   function listTools(n) {
-    return n ? '<div class="ltools noprint"><button type="button" class="pbtn" data-act="print-list">🖨 ' + L("طباعة القائمة", "Print list") + " (" + n + ")</button></div>" : "";
+    return n ? '<button type="button" class="pbtn" data-act="print-list">🖨 ' + L("طباعة القائمة", "Print list") + " (" + n + ")</button>" : "";
   }
   // تذكير الإداري المداوم بالطلب على الواتساب
   function remindBox(r) {
@@ -760,7 +761,7 @@
     setList((c ? T(CATS[c].t) : L("كل الطلبات", "All requests")) + " — " + label + (s ? L(" — بحث: ", " — search: ") + s : ""), shown);
     var tiles = F.filter(function (x) { return x[3]; }).map(function (x) { return [cat.filter(x[2]).length, x[1], link(path, { f: x[0], c: c }), f === x[0]]; });
     return hello(u, tiles) + (intro || "") + filterBar(path, s, f, F.map(function (x) { return [x[0], x[1]]; }), c) +
-      catBar(path, { f: f, q: s, c: c }, items) + listTools(shown.length) + cards(shown, mode);
+      catBar(path, { f: f, q: s, c: c }, items, shown.length) + cards(shown, mode);
   }
   var ALL = function () { return true; };
   /* مسؤول المهنيين: إجازة مهنيين + إذن مغادرة */
@@ -1163,6 +1164,7 @@
   app.addEventListener("change", function (ev) {
     var t = ev.target;
     if (t.id === "f_kind") toggleKind();
+    if (t.dataset.nav) { nav(t.value); return; }
     if (t.id === "f_time_from") syncPermTime();
     if (t.id === "f_date_from") syncLate();
     if (t.id === "f_ext_of" || t.id === "f_date_to") syncExt();

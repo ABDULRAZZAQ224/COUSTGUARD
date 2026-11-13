@@ -14,7 +14,8 @@
   var LATE_DAYS = 2;      // بعد يومين من تاريخ الطلب: يوصل عادي للإداري مع تنبيه احتمال الرفض
   var LATE_KINDS = ["perm", "leave", "emer", "med", "pleave", "ext"];
   var LEAVE_KINDS = ["leave", "emer", "pleave", "pexit", "ext"]; // تنبيه الحضور للقسم بعد الإجازة
-  var EXT_BASE = ["leave", "emer", "med", "pleave", "pexit", "ext"];  // الإجازات القابلة للتمديد
+  // التمديد للإجازة الاعتيادية فقط (أو تمديد سابق لها)
+  function extable(r) { return r.kind === "leave" || (r.kind === "ext" && r.ext_kind === "leave"); }
   var PRO_KINDS = ["pleave", "pexit"];                     // يعتمدها مسؤول المهنيين
   var KINDS = {
     perm: ["استئذان", "Permission"], leave: ["إجازة", "Leave"], emer: ["إجازة عارضة (طارئة)", "Casual (emergency) leave"],
@@ -29,7 +30,7 @@
   var CATS = {
     perm: { t: ["الاستئذانات", "Permissions"], one: ["استئذان", "Permission"], icon: "⏱️", kinds: ["perm"], d: ["3 ساعات بالضبط — 4 في الشهر كحد أقصى", "Exactly 3 hours — max 4 a month"] },
     leave: { t: ["الإجازات", "Leaves"], one: ["إجازة", "Leave"], icon: "🏖️", kinds: ["leave", "emer"], d: ["إجازة اعتيادية أو عارضة", "Regular or casual leave"] },
-    ext: { t: ["التمديدات", "Extensions"], one: ["تمديد إجازة", "Leave extension"], icon: "⏩", kinds: ["ext"], d: ["تمديد آخر إجازة إلى تاريخ جديد", "Extend your last leave to a new date"] },
+    ext: { t: ["التمديدات", "Extensions"], one: ["تمديد إجازة", "Leave extension"], icon: "⏩", kinds: ["ext"], d: ["تمديد آخر إجازة اعتيادية إلى تاريخ جديد", "Extend your last regular leave to a new date"] },
     med: { t: ["الطبيات", "Medical"], one: ["طبية", "Medical"], icon: "🩺", kinds: ["med"], d: ["اعتماد إجازة مرضية مع صورة", "Sick leave with a photo"] },
     meet: { t: ["المقابلات", "Meetings"], one: ["مقابلة", "Meeting"], icon: "🤝", kinds: ["meet"], d: ["طلب مقابلة أحد المسؤولين", "Request to meet an official"] },
     pro: { t: ["المهنيين", "Professionals"], one: ["مهنيين", "Professionals"], icon: "🛠️", kinds: ["pleave", "pexit"], d: ["إجازة أو إذن مغادرة للمهنيين", "Leave or exit permit for professionals"] }
@@ -527,7 +528,7 @@
   }
   /* ---------- تمديد الإجازة: تُعبّأ بيانات آخر إجازة تلقائيًا، والموظف يختار تاريخ نهاية التمديد فقط ---------- */
   function extBases(uid) {
-    return load().reqs.filter(function (r) { return r.user_id === uid && EXT_BASE.indexOf(r.kind) >= 0 && r.status !== "r"; })
+    return load().reqs.filter(function (r) { return r.user_id === uid && extable(r) && r.status !== "r"; })
       .sort(function (a, b) { var x = a.date_to || a.date_from, y = b.date_to || b.date_from; return x < y ? 1 : x > y ? -1 : byCreated(a, b); }).slice(0, 6);
   }
   function extInfo(b) {
@@ -540,7 +541,7 @@
   function extForm(u, e, v, c) {
     var top = '<form class="box" data-f="req"><div class="fh"><b>⏩ ' + L("تمديد إجازة", "Leave extension") + '</b><a href="' + link("my", { c: c }) + '">✕ ' + L("إغلاق", "Close") + "</a></div>";
     var bases = extBases(u.id);
-    if (!bases.length) return top + '<p class="msg">' + L("لا توجد لديك إجازة سابقة يمكن تمديدها.", "You have no previous leave to extend.") + "</p></form>";
+    if (!bases.length) return top + '<p class="msg">' + L("لا توجد لديك إجازة اعتيادية سابقة يمكن تمديدها (التمديد للإجازة الاعتيادية فقط).", "You have no previous regular leave to extend (extensions are for regular leave only).") + "</p></form>";
     var b = bases.filter(function (x) { return x.id === +v.ext_of; })[0] || bases[0], from = nextDay(b.date_to || b.date_from);
     return top + '<input type="hidden" name="kind" id="f_kind" value="ext">' +
       '<p class="sub">' + L("تُعبّأ بيانات آخر إجازة لك تلقائيًا، واختر فقط تاريخ نهاية التمديد.", "Your last leave is filled in automatically — just choose the new end date.") + "</p>" +
@@ -665,7 +666,7 @@
     var file = show && show.indexOf("medical_image") >= 0 ? form.medical_image.files[0] : null, base = null;
     if (d.kind === "ext") {
       base = reqById(+d.ext_of);
-      if (!base || base.user_id !== u.id || EXT_BASE.indexOf(base.kind) < 0 || base.status === "r") { base = null; e.ext_of = L("اختر الإجازة المراد تمديدها", "Choose the leave to extend"); }
+      if (!base || base.user_id !== u.id || !extable(base) || base.status === "r") { base = null; e.ext_of = L("اختر الإجازة المراد تمديدها", "Choose the leave to extend"); }
       else d.date_from = nextDay(base.date_to || base.date_from); // بداية التمديد = اليوم التالي لنهاية الإجازة
       if (!d.date_to) e.date_to = L("اختر تاريخ نهاية التمديد", "Choose the extension end date");
     }

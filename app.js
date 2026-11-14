@@ -40,10 +40,10 @@
   var PERIODS = { start: ["بداية الدوام", "Start of shift"], during: ["أثناء الدوام", "During shift"], end: ["نهاية الدوام", "End of shift"] };
   var MEET = { head: ["رئيس القسم", "Head of Department"], officer: ["ضابط القسم", "Section Officer"],
                dirdept: ["مدير الإدارة", "Department Director"], dirgen: ["المدير العام", "Director General"] };
-  var HOME = { e: "my", m: "pro", h: "review", o: "review", a: "queue", s: "queue" };
+  var HOME = { e: "home", m: "home", h: "home", o: "home", a: "home", s: "home" };
   var ORG = ["الإدارة العامة لخفر السواحل", "General Administration of Coast Guard"];
   var DEPT = ["قسم الكهرباء والإلكترونيات", "Electrical & Electronics Department"];
-  var CREDIT = "Created by: ABDULRAZZAQ ALHAJRI";
+  var CREDIT = "Designed by ABDULRAZZAQ ALHAJRI";
   var AR = "٠١٢٣٤٥٦٧٨٩";
 
   function K(k) { return T(KINDS[k]) || k; }
@@ -174,6 +174,16 @@
     ];
     var D = { users: u, reqs: reqs, roster: roster, audit: [], statOk: {}, seq: { u: 10, r: 12, out: {}, d: 4 }, seeded: now };
     reqs.slice().sort(function (a, b) { return a.created < b.created ? -1 : 1; }).forEach(function (r) { r.ref = nextRef(D, r.created); });
+    // سجل عمليات تجريبي مبني على الطلبات (للتنبيهات وسجل العمليات)
+    reqs.forEach(function (r) {
+      var lt = lateBy(r.kind, r.date_from, r.created), A = D.audit;
+      A.push({ who: r.user_id, act: lt ? "late" : "submit", rid: r.id, x: lt || "", at: r.created });
+      if (r.pro_by) A.push({ who: r.pro_by, act: "pro_ok", rid: r.id, x: "", at: r.pro_at });
+      if (r.decided_by) A.push({ who: r.decided_by, act: r.status === "r" ? "rej" : lt ? "ok_late" : "ok", rid: r.id, x: "", at: r.decided_at });
+      r.followups.forEach(function (f) { A.push({ who: f.by, act: "follow", rid: r.id, x: "", at: f.at }); });
+      if (r.done_by) A.push({ who: r.done_by, act: "done", rid: r.id, x: "", at: r.done_at });
+    });
+    D.audit.sort(function (a, b) { return a.at < b.at ? 1 : -1; });
     return D;
   }
   function load() {
@@ -263,12 +273,14 @@
   var ROUTES = {
     login: { anon: true, view: viewLogin },
     register: { anon: true, view: viewRegister },
+    home: { roles: "emhoas", view: viewHome },
     my: { roles: "emhoas", view: viewMy },
     pro: { roles: "ms", view: viewPro },
     review: { roles: "hos", view: viewReview },
     queue: { roles: "as", view: viewQueue },
     stats: { roles: "mhoas", view: viewStats },
     users: { roles: "s", view: viewUsers },
+    audit: { roles: "s", view: viewAudit },
     duty: { roles: "s", view: viewDuty }
   };
   function parseHash() {
@@ -298,27 +310,178 @@
     flashes = [];
     document.body.classList.toggle("auth-bg", !u);
     document.body.classList.toggle("app-bg", !!u);
-    document.getElementById("app").innerHTML = shell(u, r.path) + "<main>" + msgs + body + "</main>" +
-      (u ? '<footer class="credit noprint">' + CREDIT + "</footer>" : "");
+    document.body.classList.remove("menu-open");
+    document.getElementById("app").innerHTML = u ? layout(u, r, msgs + body) : "<main>" + msgs + body + "</main>";
     window.scrollTo(0, 0);
     if (route.after) route.after();
   }
 
-  function shell(u, path) {
-    if (!u) return ""; // صفحات الدخول والتسجيل: خلفية كاملة بدون هيدر
-    var h = '<header><img src="logo.png" alt=""><div class="t"><b>' + T(ORG) + "</b><span>" + T(DEPT) + "</span></div>";
-    h += '<span class="u">' + esc(u.full_name) + " (" + roleName(u.role) + ")</span>";
-    if (u.role === "s") h += '<a href="#/users">' + L("الحسابات وسجل العمليات", "Accounts & audit log") + "</a>";
-    h += langBtn() + '<button type="button" data-act="logout">' + L("خروج", "Log out") + "</button></header>";
-    h += '<div class="demo noprint"><span>' + L("⚠️ نسخة عرض تجريبية — البيانات محفوظة في هذا المتصفح فقط. لا تُدخل أرقامًا سرية أو بيانات حقيقية.",
-      "⚠️ Demo version — data is stored in this browser only. Do not enter real secret numbers or personal data.") +
-      '</span><button type="button" data-act="reset">' + L("إعادة ضبط البيانات التجريبية", "Reset demo data") + "</button></div>";
-    var links = [["my", L("طلباتي", "My requests"), "emhoas"], ["pro", L("اعتماد المهنيين", "Professionals approval"), "ms"],
-      ["review", L("متابعة الطلبات", "Requests overview"), "hos"], ["queue", L("اعتماد وتنفيذ الطلبات", "Approve & execute"), "as"], ["stats", L("الإحصائيات", "Statistics"), "mhoas"], ["duty", L("زام الإداري", "Duty roster"), "s"]];
-    h += '<nav class="nav noprint">' + links.filter(function (l) { return l[2].indexOf(u.role) >= 0; }).map(function (l) {
-      return '<a href="#/' + l[0] + '"' + (l[0] === path ? ' class="on"' : "") + ">" + l[1] + "</a>";
-    }).join("") + "</nav>";
-    return h;
+  /* ---------- الهيكل الجديد: شريط علوي + قائمة جانبية + تذييل + شريط سفلي للجوال ---------- */
+  var ICONS = {
+    home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+    file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>',
+    list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+    check: '<path d="M20 6 9 17l-5-5"/>',
+    sliders: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
+    users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+    calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+    chart: '<path d="M12 20V10M18 20V4M6 20v-4"/>',
+    history: '<path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/>',
+    logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
+    bell: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/>',
+    clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+    globe: '<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
+    x: '<path d="M18 6 6 18M6 6l12 12"/>',
+    menu: '<path d="M3 12h18M3 6h18M3 18h18"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    clip: '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M9 12h6M9 16h6"/>',
+    chev: '<path d="m15 18-6-6 6-6"/>',
+    shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+    fwd: '<path d="m13 17 5-5-5-5M6 17l5-5-5-5"/>',
+    mega: '<path d="m3 11 18-5v12L3 13v-2z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
+    user: '<circle cx="12" cy="8" r="4.2"/><path d="M4 21c0-4.4 3.6-7.5 8-7.5s8 3.1 8 7.5"/>'
+  };
+  function ic(n) { return '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[n] || "") + "</svg>"; }
+  var MON = [["يناير", "January"], ["فبراير", "February"], ["مارس", "March"], ["أبريل", "April"], ["مايو", "May"], ["يونيو", "June"], ["يوليو", "July"], ["أغسطس", "August"],
+             ["سبتمبر", "September"], ["أكتوبر", "October"], ["نوفمبر", "November"], ["ديسمبر", "December"]];
+  function hm() { var d = new Date(); return pad(d.getHours()) + ":" + pad(d.getMinutes()); }
+  function dateLong() { var d = new Date(); return T(WD[d.getDay()]) + " " + d.getDate() + " " + T(MON[d.getMonth()]) + " " + d.getFullYear(); }
+  var KW_FLAG = '<svg viewBox="0 0 12 6" aria-hidden="true"><rect width="12" height="2" fill="#007a3d"/><rect y="2" width="12" height="2" fill="#fff"/><rect y="4" width="12" height="2" fill="#ce1126"/><path d="M0 0 3 2v2L0 6z" fill="#000"/></svg>';
+  // أعداد الإجراءات المطلوبة من المستخدم (للجرس والشارات)
+  function counts(u) {
+    var R = load().reqs, n = function (f) { return R.filter(f).length; };
+    var c = { clerk: n(function (r) { return stage(r) === "clerk"; }), exec: n(function (r) { return stage(r) === "exec"; }), pro: n(function (r) { return stage(r) === "pro"; }),
+              pending: n(function (r) { return r.status === "p"; }), mine: n(function (r) { return r.user_id === u.id && r.status === "p"; }) };
+    c.bell = { e: c.mine, m: c.pro, h: c.pending, o: c.pending, a: c.clerk + c.exec, s: c.clerk + c.exec + c.pro }[u.role] || 0;
+    c.bellHref = { e: "#/my", m: "#/pro?f=w", h: "#/review?f=p", o: "#/review?f=p", a: "#/queue?f=w", s: "#/queue?f=w" }[u.role];
+    return c;
+  }
+  function mainHref(u) { return { e: "#/my", m: "#/pro", h: "#/review", o: "#/review", a: "#/queue?f=w", s: "#/queue?f=w" }[u.role]; }
+  function topbar(u, c) {
+    return '<header class="top noprint"><button type="button" class="burger" data-act="menu" aria-label="' + L("القائمة", "Menu") + '">' + ic("menu") + "</button>" +
+      '<a class="brand" href="#/home"><img src="logo.png" alt=""><span><b>' + T(ORG) + "</b><small>" + T(DEPT) + "</small></span></a>" +
+      '<div class="tinfo"><span class="ti">' + ic("clock") + '<b id="clk">' + hm() + '</b></span><span class="ti">' + ic("calendar") + '<b id="dte">' + dateLong() + "</b></span>" +
+      '<a class="bell" href="' + c.bellHref + '" title="' + L("بانتظار إجراء", "Awaiting action") + '">' + ic("bell") + (c.bell ? "<i>" + c.bell + "</i>" : "") + "</a>" +
+      '<span class="who"><small>' + L("أهلًا وسهلًا", "Welcome") + "</small><b>" + esc(u.full_name) + "</b></span>" +
+      '<span class="ava" title="' + esc(roleName(u.role)) + '">' + ic("user") + "</span></div></header>";
+  }
+  function sideNav(u, r, c) {
+    var cur = r.path, f = r.q.f || "";
+    function item(href, label, icon, roles, badge, on) {
+      if (roles.indexOf(u.role) < 0) return "";
+      return '<a href="' + href + '"' + (on ? ' class="on"' : "") + ">" + ic(icon) + "<span>" + label + "</span>" + (badge ? '<i class="bdg">' + badge + "</i>" : "") + "</a>";
+    }
+    function group(title, items) { var h = items.join(""); return h ? '<div class="sg"><h4>' + title + "</h4>" + h + "</div>" : ""; }
+    return '<div class="sh-in"><div class="side-who"><span class="ava">' + ic("user") + "</span><span><b>" + esc(u.full_name) + "</b><small>" + roleName(u.role) + "</small></span></div>" +
+      item("#/home", L("الرئيسية", "Home"), "home", "emhoas", 0, cur === "home") +
+      group(L("إدارة الطلبات", "Requests"), [
+        item("#/my", L("طلباتي", "My requests"), "file", "emhoas", 0, cur === "my"),
+        item("#/review", L("متابعة الطلبات", "Requests overview"), "list", "hos", c.pending, cur === "review"),
+        item("#/pro", L("اعتماد المهنيين", "Professionals approval"), "check", "ms", c.pro, cur === "pro"),
+        item("#/queue?f=w", L("اعتماد الطلبات", "Approve requests"), "check", "as", c.clerk, cur === "queue" && (f === "w" || !f)),
+        item("#/queue?f=n", L("تنفيذ الطلبات", "Execute requests"), "sliders", "as", c.exec, cur === "queue" && !!f && f !== "w")
+      ]) +
+      group(L("إدارة الموظفين", "Staff"), [
+        item("#/users", L("الموظفون والصلاحيات", "Staff & permissions"), "users", "s", 0, cur === "users"),
+        item("#/duty", L("زام الإداري", "Duty roster"), "calendar", "s", 0, cur === "duty")
+      ]) +
+      group(L("التقارير والإدارة", "Reports & admin"), [
+        item("#/stats", L("الإحصائيات والتقارير", "Statistics & reports"), "chart", "mhoas", 0, cur === "stats"),
+        item("#/audit", L("سجل العمليات", "Audit log"), "history", "s", 0, cur === "audit")
+      ]) +
+      '<div class="sg">' + '<button type="button" data-act="lang">' + ic("globe") + "<span>" + L("English", "عربي") + "</span></button>" +
+      '<button type="button" data-act="logout">' + ic("logout") + "<span>" + L("تسجيل الخروج", "Log out") + "</span></button></div></div>";
+  }
+  function tabbar(u, r) {
+    var cur = "#/" + r.path, mh = mainHref(u);
+    function t(href, icon, label, on) { return '<a href="' + href + '"' + (on ? ' class="on"' : "") + ">" + ic(icon) + "<span>" + label + "</span></a>"; }
+    return '<nav class="tabbar noprint">' + t("#/home", "home", L("الرئيسية", "Home"), r.path === "home") +
+      (mh !== "#/my" ? t(mh, "check", L("الإجراءات", "Actions"), mh.indexOf(cur) === 0) : "") +
+      t("#/my", "file", L("طلباتي", "My requests"), r.path === "my") +
+      ("mhoas".indexOf(u.role) >= 0 ? t("#/stats", "chart", L("الإحصائيات", "Statistics"), r.path === "stats") : "") +
+      '<button type="button" data-act="logout">' + ic("logout") + "<span>" + L("خروج", "Log out") + "</span></button></nav>";
+  }
+  function footer() {
+    return '<footer class="foot noprint"><span class="kw">' + KW_FLAG + L("الإدارة العامة لخفر السواحل – دولة الكويت", "General Administration of Coast Guard – State of Kuwait") +
+      '</span><span class="by">' + CREDIT.replace("ABDULRAZZAQ ALHAJRI", "<b>ABDULRAZZAQ ALHAJRI</b>") + "</span></footer>";
+  }
+  var PT = { my: ["طلباتي", "My requests"], review: ["متابعة الطلبات", "Requests overview"], pro: ["اعتماد المهنيين", "Professionals approval"],
+             queue: ["اعتماد وتنفيذ الطلبات", "Approve & execute requests"], stats: ["الإحصائيات والتقارير", "Statistics & reports"] };
+  function layout(u, r, content) {
+    var c = counts(u);
+    return '<div class="lay">' + topbar(u, c) + '<div class="body"><aside class="side noprint" id="side">' + sideNav(u, r, c) + "</aside>" +
+      '<div class="scrim noprint" data-act="menu"></div><main>' +
+      '<div class="demo noprint"><span>' + L("⚠️ نسخة عرض تجريبية — البيانات محفوظة في هذا المتصفح فقط. لا تُدخل أرقامًا سرية أو بيانات حقيقية.",
+        "⚠️ Demo version — data is stored in this browser only. Do not enter real secret numbers or personal data.") +
+      '</span><button type="button" data-act="reset">' + L("إعادة ضبط البيانات التجريبية", "Reset demo data") + "</button></div>" +
+      (PT[r.path] ? '<h1 class="pt noprint">' + T(PT[r.path]) + "</h1>" : "") + content + "</main></div>" + footer() + tabbar(u, r) + "</div>";
+  }
+  setInterval(function () {
+    var a = document.getElementById("clk"), b = document.getElementById("dte");
+    if (a) a.textContent = hm(); if (b) b.textContent = dateLong();
+  }, 15000);
+
+  /* ---------- الرئيسية: لوحة المعلومات ---------- */
+  function scopeFor(u) {
+    var R = load().reqs;
+    return u.role === "e" ? R.filter(function (r) { return r.user_id === u.id; }) : u.role === "m" ? R.filter(function (r) { return isPro(r) || r.user_id === u.id; }) : R;
+  }
+  function hrefFor(u, k) {
+    var M = {
+      e: { p: "#/my", a: "#/my", x: "#/my", r: "#/my", all: "#/my" },
+      m: { p: "#/pro?f=w", a: "#/pro?f=ok", x: "#/pro?f=ok", r: "#/pro?f=r", all: "#/pro?f=all" },
+      h: { p: "#/review?f=p", a: "#/review?f=a", x: "#/review?f=a", r: "#/review?f=r", all: "#/review?f=all" },
+      a: { p: "#/queue?f=w", a: "#/queue?f=all", x: "#/queue?f=n", r: "#/queue?f=r", all: "#/queue?f=all" }
+    };
+    return (M[u.role] || M[u.role === "o" ? "h" : "a"])[k];
+  }
+  function dotOf(a) {
+    return /^(ok|ok_late|pro_ok|done|stat)$/.test(a.act) ? "g" : /^(rej|pro_rej|auto)$/.test(a.act) ? "r" : /^(submit|late)$/.test(a.act) ? "b" : "o";
+  }
+  function viewHome(q, u) {
+    var S = scopeFor(u), ids = {};
+    S.forEach(function (r) { ids[r.id] = 1; });
+    var cnt = function (f) { return S.filter(f).length; };
+    var K4 = [
+      ["blue", "list", cnt(function (r) { return r.status === "p"; }), L("طلبات جديدة", "New requests"), hrefFor(u, "p")],
+      ["green", "check", cnt(function (r) { return r.status === "a"; }), L("طلبات معتمدة", "Approved requests"), hrefFor(u, "a")],
+      ["orange", "clock", cnt(function (r) { return stage(r) === "exec"; }), L("قيد التنفيذ", "Being processed"), hrefFor(u, "x")],
+      ["gray", "x", cnt(function (r) { return r.status === "r"; }), L("طلبات مرفوضة", "Rejected requests"), hrefFor(u, "r")]
+    ];
+    var latest = S.slice().sort(byCreated).slice(0, 5);
+    var alerts = load().audit.filter(function (a) { return u.role === "e" || u.role === "m" ? a.rid && ids[a.rid] : true; }).slice(0, 5);
+    var QK = [
+      ["#/my?new=perm", "plus", L("طلب جديد", "New request"), L("استئذان، إجازة، طبية…", "Permission, leave, medical…"), "emhoas"],
+      ["#/queue?f=w", "check", L("اعتماد الطلبات", "Approve requests"), L("بانتظار اعتمادك", "Awaiting your approval"), "as"],
+      ["#/pro?f=w", "check", L("اعتماد المهنيين", "Professionals approval"), L("طلبات المهنيين", "Professionals requests"), "m"],
+      ["#/review", "list", L("متابعة الطلبات", "Requests overview"), L("للاطلاع والمتابعة", "View and follow up"), "ho"],
+      ["#/my?new=ext", "fwd", L("تمديد إجازة", "Extend leave"), L("تمديد آخر إجازة اعتيادية", "Extend your last regular leave"), "e"],
+      ["#/stats", "chart", L("لوحة الإحصائيات", "Statistics"), L("متابعة شاملة", "Full overview"), "mhoas"],
+      ["#/duty", "calendar", L("زام الإداري", "Duty roster"), L("المداومون وآلية العمل", "Who is on duty"), "s"],
+      ["#/audit", "history", L("سجل العمليات", "Audit log"), L("كل الكتب والإجراءات", "Every document and action"), "s"],
+      ["#/my", "file", L("طلباتي", "My requests"), L("حالة طلباتك وأختامها", "Your requests and stamps"), "emhoas"]
+    ].filter(function (x) { return x[4].indexOf(u.role) >= 0; }).slice(0, 5);
+    return '<section class="hero-b"><div><h1>' + L("مرحبًا بك في النظام الإلكتروني", "Welcome to the electronic system") + "</h1><h2>" +
+      L("للإدارة العامة لخفر السواحل", "of the General Administration of Coast Guard") + "</h2><p>" + T(DEPT) + " — " + esc(u.full_name) + " (" + roleName(u.role) + ")</p></div></section>" +
+      '<div class="kpis">' + K4.map(function (k) {
+        return '<a class="kpi ' + k[0] + '" href="' + k[4] + '"><span class="kic">' + ic(k[1]) + "</span><span><b>" + k[2] + "</b><small>" + k[3] + "</small></span></a>";
+      }).join("") + "</div>" +
+      '<div class="dash"><section class="panel"><div class="ph">' + ic("clip") + "<h3>" + L("أحدث الطلبات", "Latest requests") + '</h3><a class="va" href="' + hrefFor(u, "all") + '">' + L("عرض الكل", "View all") + ic("chev") + "</a></div>" +
+      '<div class="tw"><table class="dt"><thead><tr><th>' + L("رقم الطلب", "Request no.") + "</th><th>" + L("نوع الطلب", "Type") + "</th><th>" + L("الموظف", "Employee") + "</th><th>" + L("الحالة", "Status") + "</th><th>" + L("التاريخ", "Date") + "</th></tr></thead><tbody>" +
+      (latest.length ? latest.map(function (r) {
+        var st = pill(r, "my");
+        return '<tr><td><button type="button" class="lnk inl" data-act="open-req" data-id="' + r.id + '">' + esc(r.ref) + "</button></td><td>" + esc(KR(r)) + "</td><td>" + esc(uname(r.user_id)) +
+          '</td><td><span class="pill ' + st[0] + '">' + st[1] + "</span></td><td>" + ymd(new Date(r.created)) + "</td></tr>";
+      }).join("") : '<tr><td colspan="5">' + L("لا توجد طلبات بعد.", "No requests yet.") + "</td></tr>") + "</tbody></table></div></section>" +
+      '<section class="panel"><div class="ph">' + ic("mega") + "<h3>" + L("آخر التنبيهات", "Latest alerts") + "</h3>" + (u.role === "s" ? '<a class="va" href="#/audit">' + L("عرض الكل", "View all") + ic("chev") + "</a>" : "") + "</div>" +
+      '<ul class="alerts">' + (alerts.length ? alerts.map(function (a) {
+        var r = a.rid ? reqById(a.rid) : null;
+        return '<li><i class="dot ' + dotOf(a) + '"></i><span class="tx">' + esc(actText(a)) + (r ? ' — <button type="button" class="lnk inl" data-act="open-req" data-id="' + r.id + '">' + esc(r.ref) + "</button> / " + esc(uname(r.user_id)) : "") +
+          "</span><time>" + ymdhm(a.at) + "</time></li>";
+      }).join("") : "<li>" + L("لا توجد تنبيهات بعد.", "No alerts yet.") + "</li>") + "</ul></section></div>" +
+      '<h3 class="qh">' + ic("plus") + L("اختصارات سريعة", "Quick shortcuts") + '</h3><div class="quick">' + QK.map(function (x) {
+        return '<a class="qk" href="' + x[0] + '">' + ic(x[1]) + "<b>" + x[2] + "</b><small>" + x[3] + "</small></a>";
+      }).join("") + "</div>";
   }
 
   /* ---------- الختم: اسم الشخص ومسماه ---------- */
@@ -747,8 +910,7 @@
   function byName(list, q) { return q ? list.filter(function (r) { return uname(r.user_id).indexOf(q) >= 0 || (r.ref || "").indexOf(q) >= 0; }) : list; }
   // ترحيب + مربعات عدّادات: [[العدد، العنوان، رابط اختياري، مفعّل؟]]
   function hello(u, tiles) {
-    return '<div class="hello">' + L("أهلًا، ", "Welcome, ") + esc((u.full_name || u.username).split(" ")[0]) + "</div>" +
-      '<div class="tiles">' + tiles.map(function (t) {
+    return '<div class="tiles">' + tiles.map(function (t) {
         var tag = t[2] ? "a" : "div";
         return "<" + tag + (t[2] ? ' href="' + t[2] + '"' : "") + (t[3] ? ' class="on"' : "") + "><b>" + t[0] + "</b>" + t[1] + "</" + tag + ">";
       }).join("") + "</div>";
@@ -1124,22 +1286,25 @@
       }).join("") : '<tr><td colspan="' + (withDoc ? 4 : 3) + '">' + L("لا توجد عمليات", "No activity") + "</td></tr>") + "</tbody></table></div>";
   }
   function viewUsers(q) {
-    var D = load(), ro = { e: roleName("e"), m: roleName("m"), h: roleName("h"), o: roleName("o"), a: roleName("a") }, s = (q.q || "").trim();
+    var D = load(), ro = { e: roleName("e"), m: roleName("m"), h: roleName("h"), o: roleName("o"), a: roleName("a") };
     function inp(u, f, ph) { return '<input data-uf="' + f + '" data-uid="' + u.id + '" value="' + esc(u[f] || "") + '" placeholder="' + ph + '" dir="auto">'; }
-    var aud = D.audit.filter(function (a) {
-      if (!s) return true;
-      var r = a.rid ? reqById(a.rid) : null;
-      return (r && ((r.ref || "").indexOf(s) >= 0 || uname(r.user_id).indexOf(s) >= 0)) || uname(a.who).indexOf(s) >= 0 || actText(a).indexOf(s) >= 0;
-    }).slice(0, 150);
     return "<h2>" + L("الحسابات والصلاحيات", "Accounts & permissions") + '</h2><p class="sub">' + L("الاسم والرتبة والمسمى هي ما يظهر في الختم. عدّل الخانة ثم اضغط خارجها للحفظ.", "Name, rank and title are what appear on the stamp. Edit a cell and click outside it to save.") + "</p>" +
       '<div class="tw"><table class="ut"><thead><tr><th>' + L("المستخدم", "User") + "</th><th>" + L("الاسم", "Name") + "</th><th>" + L("الرتبة", "Rank") + "</th><th>" + L("المسمى", "Title") + "</th><th>" + L("الصلاحية", "Role") + "</th><th>" + L("الختم", "Stamp") + "</th></tr></thead><tbody>" +
       D.users.map(function (u) {
         var cell = u.role === "s" ? roleName("s") : '<select data-role="' + u.id + '">' + Object.keys(ro).map(function (k) { return '<option value="' + k + '"' + (k === u.role ? " selected" : "") + ">" + ro[k] + "</option>"; }).join("") + "</select>";
         return "<tr><td>" + esc(u.username) + "</td><td>" + inp(u, "full_name", L("الاسم", "Name")) + "</td><td>" + inp(u, "rank", L("مثال: مقدم مهندس بحري", "e.g. Lt. Col. Marine Eng.")) + "</td><td>" + inp(u, "job_title", L("المسمى", "Title")) +
           "</td><td>" + cell + '</td><td><div class="stamps c">' + stamp(u.id, roleName(u.role), null, "", true) + "</div></td></tr>";
-      }).join("") + "</tbody></table></div>" +
-      '<h2 id="audit">' + L("سجل العمليات", "Audit log") + '</h2><p class="sub">' + L("لكل طلب رقم صادر؛ اضغط على رقم الصادر لفتح الكتاب وسجله.", "Every request has an outgoing number — click it to open the document and its history.") + "</p>" +
-      '<form class="flt" data-f="filter" data-path="users"><input name="q" value="' + esc(s) + '" placeholder="' + L("ابحث برقم الصادر أو الاسم أو العملية", "Search by outgoing no., name or action") + '"><button>' + L("بحث", "Search") + "</button></form>" +
+      }).join("") + "</tbody></table></div>";
+  }
+  function viewAudit(q) {
+    var s = (q.q || "").trim();
+    var aud = load().audit.filter(function (a) {
+      if (!s) return true;
+      var r = a.rid ? reqById(a.rid) : null;
+      return (r && ((r.ref || "").indexOf(s) >= 0 || uname(r.user_id).indexOf(s) >= 0)) || uname(a.who).indexOf(s) >= 0 || actText(a).indexOf(s) >= 0;
+    }).slice(0, 150);
+    return '<h2 id="audit">' + L("سجل العمليات", "Audit log") + '</h2><p class="sub">' + L("لكل طلب رقم صادر؛ اضغط على رقم الصادر لفتح الكتاب وسجله.", "Every request has an outgoing number — click it to open the document and its history.") + "</p>" +
+      '<form class="flt" data-f="filter" data-path="audit"><input name="q" value="' + esc(s) + '" placeholder="' + L("ابحث برقم الصادر أو الاسم أو العملية", "Search by outgoing no., name or action") + '"><button>' + L("بحث", "Search") + "</button></form>" +
       auditTable(aud, true);
   }
 
@@ -1180,6 +1345,7 @@
     if (b.hasAttribute("data-close")) return closeModal();
     var act = b.dataset.act, u0 = me();
     ev.preventDefault();
+    if (act === "menu") { document.body.classList.toggle("menu-open"); return; }
     if (act === "logout") { setUid(null); go("login"); }
     else if (act === "lang") {
       LANG = LANG === "en" ? "ar" : "en";

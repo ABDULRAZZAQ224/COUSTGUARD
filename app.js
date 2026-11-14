@@ -311,7 +311,7 @@
     document.body.classList.toggle("auth-bg", !u);
     document.body.classList.toggle("app-bg", !!u);
     document.body.classList.remove("menu-open");
-    document.getElementById("app").innerHTML = u ? layout(u, r, msgs + body) : "<main>" + msgs + body + "</main>";
+    document.getElementById("app").innerHTML = u ? layout(u, r, msgs + body) : authLayout(msgs + body);
     window.scrollTo(0, 0);
     if (route.after) route.after();
   }
@@ -579,7 +579,7 @@
   function viewLogin() {
     var s = loginState; loginState = { errs: null, val: {} };
     var demo = DEMO.map(function (n) { return load().users.filter(function (u) { return u.username === n && u.password === "123456"; })[0]; }).filter(Boolean);
-    return '<div class="auth">' + '<div class="lang-sw">' + langBtn("lang lt") + "</div>" + authHero() +
+    return '<div class="auth">' + authHead("user", L("تسجيل الدخول", "Sign in"), L("أدخل بيانات حسابك للمتابعة", "Enter your account details to continue")) +
       '<form data-f="login">' + (s.errs ? '<p class="err">' + esc(s.errs) + "</p>" : "") +
       field("username", L("اسم المستخدم", "Username"), { autocomplete: "username", required: "" }, null, s.val.username) +
       field("password", L("كلمة المرور", "Password"), { type: "password", autocomplete: "current-password", required: "" }) +
@@ -588,10 +588,23 @@
         return '<button type="button" data-act="quick" data-u="' + esc(u.username) + '">' + esc(u.username) + "<small>" + roleName(u.role) + "</small></button>";
       }).join("") + "</div></div>" : "") +
       '<p class="note">' + L("نسخة تجريبية — أي بيانات أو طلبات تُدخلها هنا تُحفظ في هذا المتصفح فقط.", "Demo version — anything you enter here is saved in this browser only.") +
-      '</p><p class="credit in">' + CREDIT + "</p></div>";
+      "</p></div>";
   }
-  function authHero() {
-    return '<div class="hero"><img src="logo.png" alt=""><h1>' + T(ORG) + "</h1><p>" + T(DEPT) + "</p></div>";
+  function authHead(icon, title, sub) {
+    return '<div class="auth-h">' + ic(icon) + "<div><h2>" + title + "</h2><p>" + sub + "</p></div></div>";
+  }
+  // صفحات الدخول والتسجيل: نفس الشريط العلوي والتذييل، وصورة الطراد بجانب بطاقة الدخول
+  function authLayout(content) {
+    return '<div class="lay auth-lay"><header class="top"><a class="brand" href="#/login"><img src="logo.png" alt=""><span><b>' + T(ORG) + "</b><small>" + T(DEPT) + "</small></span></a>" +
+      '<div class="tinfo"><span class="ti">' + ic("clock") + '<b id="clk">' + hm() + '</b></span><span class="ti">' + ic("calendar") + '<b id="dte">' + dateLong() + "</b></span>" +
+      '<span><button type="button" class="tlang" data-act="lang">' + ic("globe") + "<span>" + L("English", "عربي") + "</span></button></span></div></header>" +
+      '<div class="auth-wrap"><section class="auth-hero"><div><img class="ah-logo" src="logo.png" alt="">' +
+      "<h1>" + L("مرحبًا بك في النظام الإلكتروني", "Welcome to the electronic system") + "</h1><h2>" + L("للإدارة العامة لخفر السواحل", "of the General Administration of Coast Guard") + "</h2>" +
+      "<p>" + T(DEPT) + " — " + L("نظام الطلبات الإدارية", "Administrative Requests System") + "</p>" +
+      '<ul class="ah-f"><li>' + ic("file") + L("تقديم الاستئذانات والإجازات والطلبات إلكترونيًا", "Submit permissions, leaves and requests online") + "</li>" +
+      "<li>" + ic("check") + L("اعتماد بالأختام الرسمية ورقم صادر لكل طلب", "Official stamps and an outgoing number for every request") + "</li>" +
+      "<li>" + ic("chart") + L("متابعة وإحصائيات وتقارير قابلة للطباعة", "Tracking, statistics and printable reports") + "</li></ul></div></section>" +
+      '<main class="auth-main">' + content + "</main></div>" + footer() + "</div>";
   }
   function doLogin(d) {
     var u = load().users.filter(function (x) { return x.username.toLowerCase() === (d.username || "").toLowerCase(); })[0];
@@ -603,7 +616,7 @@
   var regState = { errs: {}, val: {} };
   function viewRegister() {
     var s = regState; regState = { errs: {}, val: {} };
-    return '<div class="auth">' + '<div class="lang-sw">' + langBtn("lang lt") + "</div>" + authHero() + "<h2>" + L("تسجيل موظف جديد", "New employee registration") + '</h2><form data-f="register">' +
+    return '<div class="auth">' + authHead("users", L("تسجيل موظف جديد", "New employee registration"), L("أنشئ حسابك لتقديم الطلبات إلكترونيًا", "Create your account to submit requests online")) + '<form data-f="register">' +
       field("username", L("اسم المستخدم", "Username"), { required: "" }, s.errs, s.val.username) +
       field("full_name", L("الاسم الثلاثي", "Full name (three parts)"), { required: "" }, s.errs, s.val.full_name) +
       field("job_title", L("المسمى الوظيفي", "Job title"), { required: "" }, s.errs, s.val.job_title) +
@@ -611,7 +624,7 @@
       field("phone", L("رقم الهاتف", "Phone number"), { required: "", inputmode: "numeric", maxlength: "8" }, s.errs, s.val.phone) +
       field("password1", L("كلمة المرور", "Password"), { type: "password", required: "", autocomplete: "new-password" }, s.errs) +
       field("password2", L("تأكيد كلمة المرور", "Confirm password"), { type: "password", required: "", autocomplete: "new-password" }, s.errs) +
-      '<button class="p wide">' + L("إنشاء الحساب", "Create account") + '</button><a class="btn-out" href="#/login">' + L("لديك حساب؟ سجّل دخولك", "Have an account? Sign in") + '</a></form><p class="credit in">' + CREDIT + "</p></div>";
+      '<button class="p wide">' + L("إنشاء الحساب", "Create account") + '</button><a class="btn-out" href="#/login">' + L("لديك حساب؟ سجّل دخولك", "Have an account? Sign in") + '</a></form></div>';
   }
   function doRegister(d) {
     var e = {}, D = load();

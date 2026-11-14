@@ -344,3 +344,46 @@ table.dgrid td.off{opacity:.4}
 }
 
 .ava .ic{width:62%;height:62%;fill:currentColor;stroke:none}
+
+/* ===== صفحات الدخول والتسجيل بنفس الثيم ===== */
+body.auth-bg{background:var(--bg)!important;animation:none!important}
+body.auth-bg .waves{display:none}
+.auth-lay{min-height:100vh;display:flex;flex-direction:column}
+.auth-wrap{flex:1;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:28px;align-items:center;max-width:1240px;width:100%;margin:0 auto;padding:30px 26px 46px}
+.auth-hero{position:relative;border-radius:22px;overflow:hidden;min-height:540px;display:flex;align-items:flex-end;padding:36px;background:var(--navy);box-shadow:0 18px 40px rgba(10,35,66,.25)}
+.auth-hero::after{content:"";position:absolute;inset:-4%;background:url(bg.png) center/cover;animation:heroPan 28s ease-in-out infinite alternate}
+@keyframes heroPan{from{transform:scale(1.06) translateX(-2%)}to{transform:scale(1.06) translateX(2%)}}
+.auth-hero::before{content:"";position:absolute;inset:0;z-index:1;background:linear-gradient(to top,rgba(10,35,66,.95) 0%,rgba(10,35,66,.6) 45%,rgba(10,35,66,.05) 100%)}
+.auth-hero>div{position:relative;z-index:2;color:#fff}
+.ah-logo{width:86px;height:86px;object-fit:contain;animation:bob 4s ease-in-out infinite;filter:drop-shadow(0 6px 14px rgba(0,0,0,.4))}
+.auth-hero h1{font-size:32px;margin:10px 0 0;font-weight:800;line-height:1.3}
+.auth-hero h2{font-size:26px;color:#fb923c;margin:2px 0 0;font-weight:800}
+.auth-hero h2::after{content:"";display:block;width:110px;height:4px;background:var(--or);border-radius:2px;margin-top:10px}
+.auth-hero p{margin:12px 0 0;opacity:.92;font-weight:600}
+.ah-f{list-style:none;padding:0;margin:16px 0 0;display:grid;gap:8px}
+.ah-f li{display:flex;align-items:center;gap:10px;font-weight:700;font-size:14.5px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:8px 12px;backdrop-filter:blur(4px)}
+.ah-f .ic{color:#fb923c}
+body.auth-bg main.auth-main{max-width:none;margin:0;padding:0;min-height:0;display:block}
+.auth-main>.msg{max-width:440px;margin:0 auto 12px}
+.auth{max-width:440px;margin:0 auto;background:#fff;border-radius:20px;border-top:6px solid var(--or);padding:26px 26px 20px;box-shadow:0 18px 40px rgba(10,35,66,.15)}
+.auth-h{display:flex;align-items:center;gap:12px;margin-bottom:10px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.auth-h>.ic{width:50px;height:50px;padding:12px;border-radius:14px;background:linear-gradient(160deg,var(--navy3),var(--navy));color:#fb923c;flex:none}
+.auth-h h2{margin:0;font-size:21px;color:var(--navy);text-align:start}
+.auth-h p{margin:0;color:var(--mut);font-size:13.5px}
+.auth input{border-color:#cbd5e1;background:#f8fafc}
+.auth input:focus{background:#fff}
+.auth button.p.wide{background:linear-gradient(90deg,#fb923c,var(--or))}
+.demo-users button:hover{background:#e2e8f0}
+.tlang{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.35);color:#fff;border-radius:10px;padding:6px 12px;font:inherit;font-weight:700;cursor:pointer}
+.tlang:hover{background:rgba(255,255,255,.18)}
+.tlang .ic{width:18px;height:18px}
+@media(max-width:900px){
+  .auth-wrap{grid-template-columns:1fr;gap:16px;padding:14px 12px 30px;align-content:start}
+  .auth-hero{min-height:200px;padding:20px}
+  .auth-hero h1{font-size:21px}.auth-hero h2{font-size:17px}.auth-hero h2::after{width:70px;margin-top:6px}
+  .auth-hero p{font-size:13px}
+  .ah-f{display:none}.ah-logo{width:56px;height:56px}
+  .auth{padding:20px 16px 16px}
+  .auth-lay .foot{padding-bottom:14px}
+}
+@media (prefers-reduced-motion:reduce){.auth-hero::after,.ah-logo{animation:none!important}}

@@ -72,7 +72,11 @@
   function today() { return ymd(new Date()); }
   function toMin(t) { var p = t.split(":"); return +p[0] * 60 + +p[1]; }
   function fromMin(m) { return pad(Math.floor(m / 60)) + ":" + pad(m % 60); }
-  function isPro(r) { return PRO_KINDS.indexOf(r.kind) >= 0 || (r.kind === "ext" && PRO_KINDS.indexOf(r.ext_kind) >= 0); }
+  function isPro(r) {
+    if (PRO_KINDS.indexOf(r.kind) >= 0 || (r.kind === "ext" && PRO_KINDS.indexOf(r.ext_kind) >= 0)) return true;
+    var u = db && userById(r.user_id); return !!(u && u.pro); // طلبات المهني تتبع مسؤول المهنيين
+  }
+  function proTitle(t) { return /مهني|مهنية|professional|technician/i.test(t || ""); }
   function KR(r) { return r.kind === "ext" ? T(EXTN[r.ext_kind] || KINDS.ext) : K(r.kind); }
   function nextDay(s) { return ymd(addDays(parseDate(s), 1)); }
   function spanDays(a, b) { return Math.round((parseDate(b) - parseDate(a)) / 864e5) + 1; }
@@ -145,7 +149,7 @@
       [9, "pemp", "e", "راشد حمد الديحاني", "مهني كهرباء", ""]
     ].map(function (x) {
       return { id: x[0], username: x[1], password: "123456", role: x[2], full_name: x[3], job_title: x[4], rank: x[5],
-               civil_id: "2900101000" + pad(x[0]), phone: "5000000" + x[0], duty: x[0] === 4 ? ymd(t) : "" };
+               civil_id: "2900101000" + pad(x[0]), phone: "5000000" + x[0], duty: x[0] === 4 ? ymd(t) : "", pro: x[0] === 9 };
     });
     function R(o) {
       return Object.assign({ date_to: "", depart_date: "", time_from: "", time_to: "", meet_with: "", meet_reason: "", perm_period: "", notes: "", med: "", secret: "",
@@ -192,6 +196,7 @@
     if (!db || !db.users) { db = seed(); save(); }
     if (!db.statOk) db.statOk = {};
     if (!db.seq.out) db.seq.out = {};
+    db.users.forEach(function (u) { if (u.pro === undefined) u.pro = u.role === "e" && proTitle(u.job_title); });
     if (!db.roster) { // ترقية: أنشئ زام الإداري من الإداريين الحاليين
       var t0 = today(), t1 = ymd(addDays(new Date(), 1));
       db.roster = db.users.filter(function (u) { return u.role === "a"; }).map(function (u, i) {
@@ -238,6 +243,12 @@
       "Rotation: " + daysTxt(+e.on) + " on, " + daysTxt(+e.off) + " off, starting " + e.start);
     return L("أيام ثابتة: ", "Fixed days: ") + (e.days || []).slice().sort().map(function (i) { return T(WD[i]); }).join(L("، ", ", "));
   }
+  // وقت دخول الزام وخروجه (إذا كان الخروج قبل الدخول أو مساويًا له فهو في اليوم التالي)
+  function shiftTimes(e) { return { tin: (e && e.tin) || "07:00", tout: (e && e.tout) || "07:00" }; }
+  function shiftSpanTxt(e) {
+    var t = shiftTimes(e), nx = toMin(t.tout) <= toMin(t.tin);
+    return L("الزام من " + t.tin + " إلى " + t.tout + (nx ? " (اليوم التالي)" : ""), "Shift " + t.tin + " to " + t.tout + (nx ? " (next day)" : ""));
+  }
   function dutyToday() { return load().roster.filter(function (e) { return dutyOn(e); }); }
   function reqById(id) { return load().reqs.filter(function (r) { return r.id === id; })[0]; }
 
@@ -249,7 +260,7 @@
     ok: ["اعتماد الطلب", "Request approved"], ok_late: ["اعتماد طلب متأخر", "Late request approved"], rej: ["رفض الطلب", "Request rejected"],
     follow: ["طلب متابعة", "Follow-up requested"], done: ["تم عمل اللازم", "Completed"], print: ["طباعة الطلب", "Request printed"],
     reveal: ["عرض الرقم السري", "Secret number viewed"], remind: ["تذكير الإداري", "Clerk reminded"], stat: ["اعتماد الإحصائية", "Statistics approved"],
-    duty_add: ["إضافة إلى زام الإداري", "Added to duty roster"], duty_edit: ["تعديل زام الإداري", "Duty roster edited"], duty_del: ["حذف من زام الإداري", "Removed from duty roster"]
+    duty_add: ["إضافة إلى زام الإداري", "Added to duty roster"], duty_edit: ["تعديل زام الإداري", "Duty roster edited"], duty_del: ["حذف من زام الإداري", "Removed from duty roster"], user_edit: ["تعديل بيانات موظف", "Employee details edited"]
   };
   function log(act, rid, x) {
     var u = me();
@@ -640,8 +651,9 @@
     if ((d.password1 || "").length < 6) e.password1 = L("كلمة المرور 6 أحرف على الأقل", "Password must be at least 6 characters");
     else if (d.password1 !== d.password2) e.password2 = L("كلمتا المرور غير متطابقتين", "Passwords do not match");
     if (Object.keys(e).length) { regState = { errs: e, val: d }; return render(); }
-    D.users.push({ id: D.seq.u++, username: d.username, password: d.password1, role: "e", full_name: fn.join(" "), job_title: d.job_title, rank: "", civil_id: cid, phone: ph, duty: "" });
-    save(); flash("ok", L("تم إنشاء الحساب، سجّل دخولك", "Account created — please sign in")); go("login");
+    var isProf = proTitle(d.job_title); // مسماه مهني ← تلقائيًا تابع لمسؤول المهنيين
+    D.users.push({ id: D.seq.u++, username: d.username, password: d.password1, role: "e", full_name: fn.join(" "), job_title: d.job_title, rank: "", civil_id: cid, phone: ph, duty: "", pro: isProf });
+    save(); flash("ok", L("تم إنشاء الحساب، سجّل دخولك", "Account created — please sign in") + (isProf ? L(" — تم تسجيلك ضمن المهنيين (تابع لمسؤول المهنيين).", " — you were registered as a professional (under the Professionals Officer).") : "")); go("login");
   }
 
   /* ---------- طلباتي ---------- */
@@ -673,11 +685,12 @@
     var cnt = function (st) { return all.filter(function (r) { return r.status === st; }).length; };
     var head = hello(u, [[n + " / " + LIMIT, L("استئذانات هذا الشهر", "Permissions this month")], [cnt("p"), L("قيد الاعتماد", "Pending")], [cnt("a"), L("معتمد", "Approved")]]) +
       "<h2>" + L("طلب جديد", "New request") + '</h2><p class="sub">' + L("اختر القسم المطلوب:", "Choose a section:") + "</p>" +
-      '<div class="cats">' + Object.keys(CATS).map(function (k) {
+      '<div class="cats">' + Object.keys(CATS).filter(function (k) { return k !== "pro" || u.pro || "ms".indexOf(u.role) >= 0; }).map(function (k) {
         return '<a href="' + link("my", { "new": k, c: c }) + '"' + (k === nw ? ' class="on"' : "") + "><i>" + CATS[k].icon + "</i><b>" + T(CATS[k].one) + "</b><small>" + T(CATS[k].d) + "</small></a>";
       }).join("") + "</div>";
     var list = "<h2>" + L("طلباتي", "My requests") + "</h2>" + catBar("my", { c: c }, all, items.length) +
       (items.length ? items.map(myCard).join("") : "<p>" + L("لا توجد طلبات في هذا القسم.", "No requests in this section.") + "</p>");
+    if (nw === "pro" && !u.pro && "ms".indexOf(u.role) < 0) nw = "";
     if (!nw) return head + list;
     if (nw === "ext") return head + extForm(u, e, v, c) + list;
     var C = CATS[nw], kind = v.kind && catOf(v.kind) === nw ? v.kind : C.kinds[0], sub = {};
@@ -815,7 +828,7 @@
   }
   function toggleKind() {
     var k = document.getElementById("f_kind"); if (!k) return;
-    var show = SHOW[k.value] || [], pro = k.value === "ext" ? extPro() : PRO_KINDS.indexOf(k.value) >= 0;
+    var show = SHOW[k.value] || [], pro = !!(me() || {}).pro || (k.value === "ext" ? extPro() : PRO_KINDS.indexOf(k.value) >= 0);
     OPTIONAL.forEach(function (n) { var el = document.querySelector('[data-fld="' + n + '"]'); if (el) el.hidden = show.indexOf(n) < 0; });
     var lf = k.value !== "ext" && document.querySelector('label[for="f_date_from"]'); if (lf) lf.textContent = k.value === "pexit" ? L("تاريخ الإجازة (من)", "Leave from") : L("التاريخ / من تاريخ", "Date / from");
     var tt = document.getElementById("f_time_to"), lt = document.querySelector('label[for="f_time_to"]');
@@ -830,7 +843,7 @@
     var k = document.getElementById("f_kind"), df = document.getElementById("f_date_from"), lh = document.getElementById("late-hint");
     if (!k || !df || !lh) return;
     var n = lateBy(k.value, df.value);
-    lh.hidden = !n; lh.textContent = n ? lateForm(n, k.value === "ext" ? extPro() : PRO_KINDS.indexOf(k.value) >= 0) : "";
+    lh.hidden = !n; lh.textContent = n ? lateForm(n, !!(me() || {}).pro || (k.value === "ext" ? extPro() : PRO_KINDS.indexOf(k.value) >= 0)) : "";
   }
   function syncPermTime() {
     var k = document.getElementById("f_kind"), tf = document.getElementById("f_time_from"), tt = document.getElementById("f_time_to");
@@ -1167,7 +1180,7 @@
   var statTemp = null;
   function statTabs(v) {
     return '<div class="stabs noprint"><a href="#/stats"' + (v !== "shift" ? ' class="on"' : "") + ">" + ic("chart") + L("الإحصائية العامة", "General statistics") + "</a>" +
-      '<a href="#/stats?v=shift"' + (v === "shift" ? ' class="on"' : "") + ">" + ic("calendar") + L("تقرير الزام اليومي", "Daily shift report") + "</a></div>";
+      '<a href="#/stats?v=shift"' + (v === "shift" ? ' class="on"' : "") + ">" + ic("calendar") + L("تقرير الزام", "Shift report") + "</a></div>";
   }
   function approveBar(key, canOk, ok, label) {
     return '<div class="sbar noprint">' + (ok ? '<p class="msg ok">✔ ' + L("معتمد لهذه الطباعة فقط — يعود التقرير بدون اعتماد تلقائيًا بعد الطباعة.", "Approved for this printout only — it returns to unapproved automatically after printing.") + "</p>"
@@ -1255,39 +1268,45 @@
       (eRows || '<tr><td colspan="5">' + L("لا توجد بيانات", "No data") + "</td></tr>") + "</tbody></table></section></div>" +
       signBlock(ok, L("اعتماد الإحصائية", "Statistics approved")) + repFoot() + "</div>";
   }
-  /* تقرير الزام اليومي: شنو سوّى الشخص خلال دوامه (الكتب والإجراءات) */
+  /* تقرير الزام: من دخول الزام إلى خروجه (قد يمتد ليومين) — شنو سوّى الشخص خلال دوامه */
   var SHIFT_ACTS = { ok: 1, ok_late: 1, pro_ok: 1, rej: 2, pro_rej: 2, done: 3, follow: 4, print: 5 };
+  function dtAt(day, t) { var p = t.split(":"); var d = parseDate(day); d.setHours(+p[0], +p[1], 0, 0); return d; }
+  function dLong(d) { return T(WD[d.getDay()]) + " " + ymd(d) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes()); }
   function viewShift(q, u) {
     var D = load(), canPick = "hos".indexOf(u.role) >= 0, who = canPick && q.w ? userById(+q.w) || u : u;
-    var day = /^\d{4}-\d{2}-\d{2}$/.test(q.d || "") ? q.d : today(), dd = parseDate(day);
-    var acts = D.audit.filter(function (a) { return a.who === who.id && ymd(new Date(a.at)) === day; }).sort(function (a, b) { return a.at < b.at ? -1 : 1; });
+    var ro = D.roster.filter(function (e) { return e.uid === who.id; })[0], st = shiftTimes(ro);
+    // الافتراضي: الزام الحالي (لو الحين قبل وقت الدخول، فالزام بدأ أمس)
+    var defDay = toMin(hm()) < toMin(st.tin) && toMin(st.tout) <= toMin(st.tin) ? ymd(addDays(new Date(), -1)) : today();
+    var day = /^\d{4}-\d{2}-\d{2}$/.test(q.d || "") ? q.d : defDay, dd = parseDate(day);
+    var from = dtAt(day, st.tin), to = dtAt(day, st.tout);
+    if (to <= from) to = addDays(to, 1);
+    var acts = D.audit.filter(function (a) { var t = new Date(a.at); return a.who === who.id && t >= from && t < to; }).sort(function (a, b) { return a.at < b.at ? -1 : 1; });
     var c = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }, docs = {};
     acts.forEach(function (a) { if (SHIFT_ACTS[a.act]) c[SHIFT_ACTS[a.act]]++; if (a.rid) docs[a.rid] = 1; });
-    var ro = D.roster.filter(function (e) { return e.uid === who.id; })[0], onD = ro ? dutyOn(ro, dd) : null;
-    var span = acts.length ? L("من ", "") + ymdhm(acts[0].at).slice(11) + L(" إلى ", " → ") + ymdhm(acts[acts.length - 1].at).slice(11) : "—";
+    var onD = ro ? dutyOn(ro, dd) : null, hrs = Math.round((to - from) / 36e5);
     var key = "shift|" + who.id + "|" + day, canOk = "amhs".indexOf(u.role) >= 0;
     if (statTemp && statTemp.key !== key) statTemp = null;
     var ok = statTemp, people = D.users.slice().sort(function (a, b) { return a.full_name.localeCompare(b.full_name, "ar"); });
     var rows = acts.map(function (a, i) {
-      var r = a.rid ? reqById(a.rid) : null;
-      return "<tr><td>" + (i + 1) + "</td><td>" + ymdhm(a.at).slice(11) + '</td><td><i class="kd ' + dotOf(a) + '"></i>' + esc(actText(a)) + "</td><td>" +
+      var r = a.rid ? reqById(a.rid) : null, t = new Date(a.at);
+      return "<tr><td>" + (i + 1) + "</td><td>" + pad(t.getDate()) + "/" + pad(t.getMonth() + 1) + " " + pad(t.getHours()) + ":" + pad(t.getMinutes()) + '</td><td><i class="kd ' + dotOf(a) + '"></i>' + esc(actText(a)) + "</td><td>" +
         (r ? '<button type="button" class="lnk inl" data-act="open-req" data-id="' + r.id + '">' + esc(r.ref) + "</button>" : "—") + "</td><td>" + (r ? esc(uname(r.user_id)) : "—") + "</td><td>" + (r ? esc(KR(r)) : "—") + "</td></tr>";
     }).join("");
     return statTabs("shift") +
       '<form class="flt noprint" data-f="filter" data-path="stats"><input type="hidden" name="v" value="shift">' +
       (canPick ? '<select name="w">' + people.map(function (x) { return '<option value="' + x.id + '"' + (x.id === who.id ? " selected" : "") + ">" + esc(x.full_name) + " — " + roleName(x.role) + "</option>"; }).join("") + "</select>" : "") +
-      '<input type="date" name="d" value="' + day + '"><button>' + L("عرض", "Show") + "</button></form>" +
+      '<label class="fl">' + L("يوم دخول الزام", "Shift start day") + '<input type="date" name="d" value="' + day + '"></label><button>' + L("عرض", "Show") + "</button></form>" +
       approveBar(key, canOk, ok, L("اعتماد وطباعة تقرير الزام", "Approve & print shift report")) +
       '<div class="rep">' + letterhead(L("تاريخ الإصدار", "Issued on")) +
-      '<div class="rt"><h1>' + L("تقرير الزام اليومي", "Daily Shift Report") + "</h1><p>" + T(WD[dd.getDay()]) + " " + day + " — " + esc(who.full_name) + "</p></div>" +
-      rinfo([[L("الموظف", "Employee"), esc(nameLine(who)) + " <small>(" + roleName(who.role) + ")</small>"], [L("التاريخ", "Date"), T(WD[dd.getDay()]) + " " + day],
-        [L("حالة الزام", "Roster status"), ro ? (onD ? '<span class="ok">🟢 ' + L("مداوم", "On duty") + "</span>" : '<span class="offd">🔴 ' + L("غير مداوم", "Off duty") + "</span>") : '<span class="muted">' + L("غير مُدرج في الزام", "Not on the roster") + "</span>"],
-        [L("فترة العمل المسجلة", "Recorded activity"), span]]) +
+      '<div class="rt"><h1>' + L("تقرير الزام", "Shift Report") + "</h1><p>" + esc(who.full_name) + " — " + L("من دخول الزام إلى خروجه", "from shift start to shift end") + " (" + hrs + L(" ساعة", " h") + ")</p></div>" +
+      rinfo([[L("الموظف", "Employee"), esc(nameLine(who)) + " <small>(" + roleName(who.role) + ")</small>"],
+        [L("دخول الزام", "Shift start"), dLong(from)], [L("خروج الزام", "Shift end"), dLong(to)],
+        [L("حالة الزام", "Roster status"), ro ? (onD ? '<span class="ok">🟢 ' + L("مداوم", "On duty") + "</span>" : '<span class="offd">🔴 ' + L("غير مداوم", "Off duty") + "</span>") : '<span class="muted">' + L("غير مُدرج في الزام", "Not on the roster") + "</span>"]]) +
       skp([["list", acts.length, L("إجمالي الإجراءات", "Total actions"), "c-navy"], ["file", Object.keys(docs).length, L("كتب تم التعامل معها", "Documents handled"), "c-purple"],
         ["check", c[1], L("اعتماد", "Approvals"), "c-green"], ["x", c[2], L("رفض", "Rejections"), "c-red"], ["sliders", c[3], L("تم عمل اللازم", "Completed"), "c-blue"], ["bell", c[4], L("طلب متابعة", "Follow-ups"), "c-orange"]]) +
-      '<section class="spanel"><h3>' + ic("history") + L("سجل الإجراءات خلال الزام", "Actions during the shift") + '</h3><div class="tw"><table class="ltab"><thead><tr><th>#</th><th>' + L("الوقت", "Time") + "</th><th>" + L("الإجراء", "Action") + "</th><th>" +
+      '<section class="spanel"><h3>' + ic("history") + L("سجل الإجراءات خلال الزام", "Actions during the shift") + '</h3><div class="tw"><table class="ltab"><thead><tr><th>#</th><th>' + L("اليوم والوقت", "Day & time") + "</th><th>" + L("الإجراء", "Action") + "</th><th>" +
       L("رقم الصادر", "Outgoing no.") + "</th><th>" + L("صاحب الطلب", "Requester") + "</th><th>" + L("نوع الطلب", "Type") + "</th></tr></thead><tbody>" +
-      (rows || '<tr><td colspan="6">' + L("لا توجد إجراءات مسجلة في هذا اليوم.", "No actions recorded on this day.") + "</td></tr>") + "</tbody></table></div></section>" +
+      (rows || '<tr><td colspan="6">' + L("لا توجد إجراءات مسجلة خلال هذا الزام.", "No actions recorded during this shift.") + "</td></tr>") + "</tbody></table></div></section>" +
       signBlock(ok, L("اعتماد تقرير الزام", "Shift report approved")) + repFoot() + "</div>";
   }
 
@@ -1300,7 +1319,7 @@
     return '<form class="box dform" data-f="duty" data-id="' + e.id + '" data-mode="' + e.mode + '">' +
       (isNew ? '<div class="fh"><b>➕ ' + L("إضافة شخص إلى زام الإداري", "Add a person to the roster") + "</b></div>"
         : '<div class="fh"><b>' + (dutyOn(e) ? "🟢 " : "🔴 ") + esc(dutyName(e)) + '</b><button type="button" class="pbtn del" data-act="duty-del" data-id="' + e.id + '">🗑 ' + L("حذف من الجدول", "Remove") + "</button></div>" +
-          '<p class="sub">' + esc(dutyRule(e)) + " — " + (dutyOn(e) ? L("مداوم اليوم", "on duty today") : L("غير مداوم اليوم", "off today") + (nd ? L("، مداومته القادمة ", ", next duty ") + T(WD[nd.getDay()]) + " " + ymd(nd) : "")) + "</p>") +
+          '<p class="sub">' + esc(dutyRule(e)) + " — " + esc(shiftSpanTxt(e)) + " — " + (dutyOn(e) ? L("مداوم اليوم", "on duty today") : L("غير مداوم اليوم", "off today") + (nd ? L("، مداومته القادمة ", ", next duty ") + T(WD[nd.getDay()]) + " " + ymd(nd) : "")) + "</p>") +
       '<div class="row"><div class="fld"><label>' + L("من حسابات النظام", "System account") + '</label><select name="uid">' + opt("", L("— اسم من خارج النظام —", "— not a system user —"), !e.uid) +
       load().users.map(function (u) { return opt(u.id, esc(u.full_name) + " (" + roleName(u.role) + ")", e.uid === u.id); }).join("") + "</select></div>" +
       '<div class="fld"><label>' + L("الاسم (لمن ليس له حساب)", "Name (if no account)") + '</label><input name="name" dir="auto" value="' + esc(e.uid ? "" : e.name) + '"></div></div>' +
@@ -1314,6 +1333,8 @@
       '<div class="cyc row3"><div class="fld"><label>' + L("أيام العمل", "Days on") + '</label><input name="on" type="number" min="1" max="30" value="' + esc(e.on) + '"></div>' +
       '<div class="fld"><label>' + L("أيام الراحة", "Days off") + '</label><input name="off" type="number" min="0" max="30" value="' + esc(e.off) + '"></div>' +
       '<div class="fld"><label>' + L("أول يوم عمل", "First day on") + '</label><input name="start" type="date" value="' + esc(e.start) + '"></div></div>' +
+      '<div class="row"><div class="fld"><label>' + L("وقت دخول الزام", "Shift starts at") + '</label><input name="tin" type="time" value="' + esc(shiftTimes(e).tin) + '"></div>' +
+      '<div class="fld"><label>' + L("وقت خروج الزام (إذا كان أصغر من الدخول فهو اليوم التالي)", "Shift ends at (earlier than start = next day)") + '</label><input name="tout" type="time" value="' + esc(shiftTimes(e).tout) + '"></div></div>' +
       '<p><button class="p">' + (isNew ? L("إضافة", "Add") : L("حفظ التعديل", "Save")) + "</button></p></form>";
   }
   function viewDuty() {
@@ -1346,7 +1367,8 @@
     if (err) { flash("err", err); return render(); }
     var e = id ? D.roster.filter(function (x) { return x.id === id; })[0] : { id: D.seq.d++ };
     if (!e) return render();
-    Object.assign(e, { uid: u ? u.id : null, name: u ? "" : name, phone: ph, mode: d.mode === "cycle" ? "cycle" : "week", days: days, on: on || 1, off: off >= 0 ? off : 0, start: d.start || today() });
+    Object.assign(e, { uid: u ? u.id : null, name: u ? "" : name, phone: ph, mode: d.mode === "cycle" ? "cycle" : "week", days: days, on: on || 1, off: off >= 0 ? off : 0, start: d.start || today(),
+      tin: /^\d{2}:\d{2}$/.test(d.tin || "") ? d.tin : "07:00", tout: /^\d{2}:\d{2}$/.test(d.tout || "") ? d.tout : "07:00" });
     if (!id) D.roster.push(e);
     log(id ? "duty_edit" : "duty_add", null, name); save();
     flash("ok", (id ? L("تم حفظ مداومة ", "Saved: ") : L("تمت إضافة ", "Added: ")) + name + " — " + (dutyOn(e) ? L("مداوم اليوم", "on duty today") : L("غير مداوم اليوم", "off today")));
@@ -1364,17 +1386,56 @@
         return "<tr><td>" + ymdhm(a.at) + "</td><td>" + esc(uname(a.who)) + "</td><td>" + esc(actText(a)) + "</td>" + (withDoc ? "<td>" + doc + "</td>" : "") + "</tr>";
       }).join("") : '<tr><td colspan="' + (withDoc ? 4 : 3) + '">' + L("لا توجد عمليات", "No activity") + "</td></tr>") + "</tbody></table></div>";
   }
+  // الموظفون والصلاحيات: جدول + نموذج تعديل كامل لبيانات الموظف (مدير النظام)
+  var editState = { errs: {}, val: null };
   function viewUsers(q) {
-    var D = load(), ro = { e: roleName("e"), m: roleName("m"), h: roleName("h"), o: roleName("o"), a: roleName("a") };
-    function inp(u, f, ph) { return '<input data-uf="' + f + '" data-uid="' + u.id + '" value="' + esc(u[f] || "") + '" placeholder="' + ph + '" dir="auto">'; }
-    return "<h2>" + L("الحسابات والصلاحيات", "Accounts & permissions") + '</h2><p class="sub">' + L("الاسم والرتبة والمسمى هي ما يظهر في الختم. عدّل الخانة ثم اضغط خارجها للحفظ.", "Name, rank and title are what appear on the stamp. Edit a cell and click outside it to save.") + "</p>" +
-      '<div class="tw"><table class="ut"><thead><tr><th>' + L("المستخدم", "User") + "</th><th>" + L("الاسم", "Name") + "</th><th>" + L("الرتبة", "Rank") + "</th><th>" + L("المسمى", "Title") + "</th><th>" + L("الصلاحية", "Role") + "</th><th>" + L("الختم", "Stamp") + "</th></tr></thead><tbody>" +
-      D.users.map(function (u) {
-        var cell = u.role === "s" ? roleName("s") : '<select data-role="' + u.id + '">' + Object.keys(ro).map(function (k) { return '<option value="' + k + '"' + (k === u.role ? " selected" : "") + ">" + ro[k] + "</option>"; }).join("") + "</select>";
-        return "<tr><td>" + esc(u.username) + "</td><td>" + inp(u, "full_name", L("الاسم", "Name")) + "</td><td>" + inp(u, "rank", L("مثال: مقدم مهندس بحري", "e.g. Lt. Col. Marine Eng.")) + "</td><td>" + inp(u, "job_title", L("المسمى", "Title")) +
-          "</td><td>" + cell + '</td><td><div class="stamps c">' + stamp(u.id, roleName(u.role), null, "", true) + "</div></td></tr>";
-      }).join("") + "</tbody></table></div>";
+    var D = load(), eu = q.edit ? userById(+q.edit) : null;
+    var rows = D.users.map(function (u) {
+      return "<tr" + (eu && eu.id === u.id ? ' class="sel"' : "") + "><td><b>" + esc(u.username) + "</b></td><td>" + (u.rank ? "<small>" + esc(u.rank) + "</small><br>" : "") + esc(u.full_name) + "</td><td>" + esc(u.job_title) +
+        (u.pro ? ' <span class="chip">' + L("مهني", "Professional") + "</span>" : "") + '</td><td dir="ltr">' + esc(u.phone) + '</td><td dir="ltr">' + esc(u.civil_id) + "</td><td>" + roleName(u.role) +
+        '</td><td><div class="stamps c">' + stamp(u.id, roleName(u.role), null, "", true) + '</div></td><td><a class="pbtn" href="#/users?edit=' + u.id + '">✏️ ' + L("تعديل", "Edit") + "</a></td></tr>";
+    }).join("");
+    return (eu ? userEditForm(eu) : "") +
+      "<h2>" + L("الموظفون والصلاحيات", "Staff & permissions") + '</h2><p class="sub">' + L("اضغط «تعديل» لتغيير أي بيانات تخص الموظف: الاسم، الرتبة، المسمى، الهاتف، الرقم المدني، اسم المستخدم، الصلاحية، المهنيين، وكلمة المرور. الاسم والرتبة والمسمى هي ما يظهر في الختم.",
+        "Click “Edit” to change anything about an employee: name, rank, title, phone, civil ID, username, role, professional status and password. Name, rank and title appear on the stamp.") + "</p>" +
+      '<div class="tw"><table class="ut"><thead><tr><th>' + L("المستخدم", "User") + "</th><th>" + L("الاسم", "Name") + "</th><th>" + L("المسمى", "Title") + "</th><th>" + L("الهاتف", "Phone") + "</th><th>" + L("الرقم المدني", "Civil ID") + "</th><th>" +
+      L("الصلاحية", "Role") + "</th><th>" + L("الختم", "Stamp") + "</th><th></th></tr></thead><tbody>" + rows + "</tbody></table></div>";
   }
+  function userEditForm(u) {
+    var s = editState, e = s.errs, v = s.val && s.val.id === u.id ? s.val : u;
+    editState = { errs: {}, val: null };
+    var ro = { e: roleName("e"), m: roleName("m"), h: roleName("h"), o: roleName("o"), a: roleName("a") };
+    return '<form class="box uedit" data-f="useredit" data-id="' + u.id + '"><div class="fh"><b>✏️ ' + L("تعديل بيانات: ", "Edit: ") + esc(u.full_name) + '</b><a href="#/users">✕ ' + L("إغلاق", "Close") + "</a></div>" +
+      '<div class="row">' + field("full_name", L("الاسم الكامل", "Full name"), { required: "", dir: "auto" }, e, v.full_name) + field("rank", L("الرتبة (تظهر في الختم)", "Rank (shown on the stamp)"), { dir: "auto" }, e, v.rank) + "</div>" +
+      '<div class="row">' + field("job_title", L("المسمى الوظيفي", "Job title"), { required: "", dir: "auto" }, e, v.job_title) + field("username", L("اسم المستخدم", "Username"), { required: "", dir: "ltr" }, e, v.username) + "</div>" +
+      '<div class="row">' + field("phone", L("رقم الهاتف (8 أرقام)", "Phone (8 digits)"), { required: "", inputmode: "numeric", maxlength: "8", dir: "ltr" }, e, v.phone) +
+      field("civil_id", L("الرقم المدني (12 رقمًا)", "Civil ID (12 digits)"), { required: "", inputmode: "numeric", maxlength: "12", dir: "ltr" }, e, v.civil_id) + "</div>" +
+      '<div class="row">' + (u.role === "s" ? '<div class="fld"><label>' + L("الصلاحية", "Role") + "</label><input value=\"" + roleName("s") + '" readonly></div>' : select("role", L("الصلاحية", "Role"), ro, e, v.role)) +
+      field("password", L("كلمة مرور جديدة (اتركها فارغة بدون تغيير)", "New password (leave blank to keep)"), { type: "password", autocomplete: "new-password" }, e) + "</div>" +
+      '<label class="chk"><input type="checkbox" name="pro"' + (v.pro ? " checked" : "") + "> " + L("مهني — تابع لمسؤول المهنيين (طلباته يعتمدها مسؤول المهنيين)", "Professional — under the Professionals Officer (their requests are approved by the Professionals Officer)") + "</label>" +
+      '<p><button class="p">' + L("حفظ البيانات", "Save details") + '</button> <a class="pbtn" href="#/users">' + L("إلغاء", "Cancel") + "</a></p></form>";
+  }
+  function doUserEdit(form) {
+    var who = me(); if (!who || who.role !== "s") return render();
+    var D = load(), u = userById(+form.dataset.id); if (!u) return render();
+    var d = formData(form), e = {}, cid = enDigits(d.civil_id || ""), ph = enDigits(d.phone || "");
+    if (!d.full_name) e.full_name = req();
+    if (!d.job_title) e.job_title = req();
+    if (!/^[\w.@+-]{1,150}$/.test(d.username || "")) e.username = L("اسم مستخدم غير صالح (حروف إنجليزية وأرقام فقط)", "Invalid username (English letters and digits only)");
+    else if (D.users.some(function (x) { return x.id !== u.id && x.username.toLowerCase() === d.username.toLowerCase(); })) e.username = L("اسم المستخدم مستخدم من قبل", "Username already taken");
+    if (!/^\d{8}$/.test(ph)) e.phone = L("رقم الهاتف يجب أن يكون 8 أرقام", "Phone number must be 8 digits");
+    if (!/^\d{12}$/.test(cid)) e.civil_id = L("الرقم المدني يجب أن يكون 12 رقمًا", "Civil ID must be 12 digits");
+    if (d.password && d.password.length < 6) e.password = L("كلمة المرور 6 أحرف على الأقل", "Password must be at least 6 characters");
+    if (u.role !== "s" && !ROLES[d.role]) e.role = L("اختر الصلاحية", "Choose a role");
+    if (Object.keys(e).length) { editState = { errs: e, val: Object.assign({ id: u.id, pro: !!d.pro }, d) }; flash("err", L("راجع الحقول المظللة", "Please check the highlighted fields")); return render(); }
+    u.full_name = d.full_name.replace(/\s+/g, " "); u.rank = d.rank || ""; u.job_title = d.job_title; u.username = d.username; u.phone = ph; u.civil_id = cid; u.pro = !!d.pro;
+    if (u.role !== "s" && d.role !== "s") u.role = d.role;
+    if (d.password) u.password = d.password;
+    log("user_edit", null, u.username); save();
+    flash("ok", L("تم حفظ بيانات ", "Saved details of ") + u.full_name);
+    go("users");
+  }
+
   function viewAudit(q) {
     var s = (q.q || "").trim();
     var aud = load().audit.filter(function (a) {
@@ -1398,6 +1459,7 @@
     else if (kind === "pro") doPro(f, ev.submitter);
     else if (kind === "decide") doDecide(f, ev.submitter);
     else if (kind === "duty") doDuty(f);
+    else if (kind === "useredit") doUserEdit(f);
     else if (kind === "qact") { if (ev.submitter && ev.submitter.value === "done") doDone(f); else doFollowup(f); }
     else if (kind === "filter") {
       var d = formData(f), qs = Object.keys(d).filter(function (k) { return d[k]; }).map(function (k) { return encodeURIComponent(k) + "=" + encodeURIComponent(d[k]); }).join("&");

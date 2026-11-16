@@ -1268,46 +1268,90 @@
       (eRows || '<tr><td colspan="5">' + L("لا توجد بيانات", "No data") + "</td></tr>") + "</tbody></table></section></div>" +
       signBlock(ok, L("اعتماد الإحصائية", "Statistics approved")) + repFoot() + "</div>";
   }
-  /* تقرير الزام: من دخول الزام إلى خروجه (قد يمتد ليومين) — شنو سوّى الشخص خلال دوامه */
+  /* تقرير الزام: اختيار الإداري والفترة (من أي يوم ووقت إلى أي يوم ووقت) + نسخ / واتساب / حفظ */
   var SHIFT_ACTS = { ok: 1, ok_late: 1, pro_ok: 1, rej: 2, pro_rej: 2, done: 3, follow: 4, print: 5 };
+  var lastShift = { text: "", name: "" };
   function dtAt(day, t) { var p = t.split(":"); var d = parseDate(day); d.setHours(+p[0], +p[1], 0, 0); return d; }
   function dLong(d) { return T(WD[d.getDay()]) + " " + ymd(d) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes()); }
-  function viewShift(q, u) {
-    var D = load(), canPick = "hos".indexOf(u.role) >= 0, who = canPick && q.w ? userById(+q.w) || u : u;
-    var ro = D.roster.filter(function (e) { return e.uid === who.id; })[0], st = shiftTimes(ro);
-    // الافتراضي: الزام الحالي (لو الحين قبل وقت الدخول، فالزام بدأ أمس)
-    var defDay = toMin(hm()) < toMin(st.tin) && toMin(st.tout) <= toMin(st.tin) ? ymd(addDays(new Date(), -1)) : today();
-    var day = /^\d{4}-\d{2}-\d{2}$/.test(q.d || "") ? q.d : defDay, dd = parseDate(day);
+  function dtVal(d) { return ymd(d) + "T" + pad(d.getHours()) + ":" + pad(d.getMinutes()); }
+  function parseDT(s) { return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s || "") ? dtAt(s.slice(0, 10), s.slice(11)) : null; }
+  // الزام الحالي للشخص حسب أوقات الدخول والخروج في زام الإداري
+  function curShift(ro, day) {
+    var st = shiftTimes(ro);
+    if (!day) day = toMin(hm()) < toMin(st.tin) && toMin(st.tout) <= toMin(st.tin) ? ymd(addDays(new Date(), -1)) : today();
     var from = dtAt(day, st.tin), to = dtAt(day, st.tout);
     if (to <= from) to = addDays(to, 1);
+    return [from, to];
+  }
+  function viewShift(q, u) {
+    var D = load(), canPick = "ahos".indexOf(u.role) >= 0;
+    // قائمة الإداريين (ومن في الزام) للاختيار
+    var inRoster = {}; D.roster.forEach(function (e) { if (e.uid) inRoster[e.uid] = 1; });
+    var clerks = D.users.filter(function (x) { return x.role === "a" || x.role === "s" || inRoster[x.id]; })
+      .sort(function (a, b) { return (a.role === "a" ? 0 : 1) - (b.role === "a" ? 0 : 1) || a.full_name.localeCompare(b.full_name, "ar"); });
+    var who = canPick && q.w ? userById(+q.w) : null;
+    if (!who) who = u.role === "a" || !canPick ? u : (clerks[0] || u);
+    var ro = D.roster.filter(function (e) { return e.uid === who.id; })[0];
+    var win = curShift(ro, /^\d{4}-\d{2}-\d{2}$/.test(q.d || "") ? q.d : "");
+    var from = parseDT(q.f) || win[0], to = parseDT(q.t) || win[1];
+    if (to < from) { var tmp = from; from = to; to = tmp; }
     var acts = D.audit.filter(function (a) { var t = new Date(a.at); return a.who === who.id && t >= from && t < to; }).sort(function (a, b) { return a.at < b.at ? -1 : 1; });
     var c = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }, docs = {};
     acts.forEach(function (a) { if (SHIFT_ACTS[a.act]) c[SHIFT_ACTS[a.act]]++; if (a.rid) docs[a.rid] = 1; });
-    var onD = ro ? dutyOn(ro, dd) : null, hrs = Math.round((to - from) / 36e5);
-    var key = "shift|" + who.id + "|" + day, canOk = "amhs".indexOf(u.role) >= 0;
+    var hrs = Math.round((to - from) / 36e5), dur = hrs >= 48 ? daysTxt(Math.round(hrs / 24)) : hrs + L(" ساعة", " h");
+    var onD = ro ? dutyOn(ro, from) : null;
+    var key = "shift|" + who.id + "|" + dtVal(from) + "|" + dtVal(to), canOk = "amhs".indexOf(u.role) >= 0;
     if (statTemp && statTemp.key !== key) statTemp = null;
-    var ok = statTemp, people = D.users.slice().sort(function (a, b) { return a.full_name.localeCompare(b.full_name, "ar"); });
+    var ok = statTemp;
     var rows = acts.map(function (a, i) {
       var r = a.rid ? reqById(a.rid) : null, t = new Date(a.at);
       return "<tr><td>" + (i + 1) + "</td><td>" + pad(t.getDate()) + "/" + pad(t.getMonth() + 1) + " " + pad(t.getHours()) + ":" + pad(t.getMinutes()) + '</td><td><i class="kd ' + dotOf(a) + '"></i>' + esc(actText(a)) + "</td><td>" +
         (r ? '<button type="button" class="lnk inl" data-act="open-req" data-id="' + r.id + '">' + esc(r.ref) + "</button>" : "—") + "</td><td>" + (r ? esc(uname(r.user_id)) : "—") + "</td><td>" + (r ? esc(KR(r)) : "—") + "</td></tr>";
     }).join("");
+    // نص التقرير للنسخ / الواتساب / الحفظ
+    var NL = "\n", txt = [L("تقرير الزام — ", "Shift report — ") + T(DEPT), L("الإداري: ", "Clerk: ") + nameLine(who),
+      L("من: ", "From: ") + dLong(from), L("إلى: ", "To: ") + dLong(to) + " (" + dur + ")", "",
+      L("إجمالي الإجراءات: ", "Total actions: ") + acts.length + L(" | الكتب: ", " | Documents: ") + Object.keys(docs).length,
+      L("اعتماد: ", "Approvals: ") + c[1] + L(" | رفض: ", " | Rejections: ") + c[2] + L(" | تم عمل اللازم: ", " | Completed: ") + c[3] + L(" | متابعة: ", " | Follow-ups: ") + c[4]];
+    if (acts.length) {
+      txt.push("", L("— التفاصيل —", "— Details —"));
+      acts.forEach(function (a, i) {
+        var r = a.rid ? reqById(a.rid) : null, t = new Date(a.at);
+        txt.push((i + 1) + ") " + pad(t.getDate()) + "/" + pad(t.getMonth() + 1) + " " + pad(t.getHours()) + ":" + pad(t.getMinutes()) + " — " + actText(a) + (r ? " — " + r.ref + " — " + uname(r.user_id) + " (" + KR(r) + ")" : ""));
+      });
+    }
+    txt.push("", L("نظام الطلبات الإدارية — الإدارة العامة لخفر السواحل", "Administrative Requests System — Coast Guard"));
+    lastShift = { text: txt.join(NL), name: "shift-" + who.username + "-" + ymd(from) + ".txt" };
     return statTabs("shift") +
-      '<form class="flt noprint" data-f="filter" data-path="stats"><input type="hidden" name="v" value="shift">' +
-      (canPick ? '<select name="w">' + people.map(function (x) { return '<option value="' + x.id + '"' + (x.id === who.id ? " selected" : "") + ">" + esc(x.full_name) + " — " + roleName(x.role) + "</option>"; }).join("") + "</select>" : "") +
-      '<label class="fl">' + L("يوم دخول الزام", "Shift start day") + '<input type="date" name="d" value="' + day + '"></label><button>' + L("عرض", "Show") + "</button></form>" +
+      '<form class="flt sflt noprint" data-f="filter" data-path="stats"><input type="hidden" name="v" value="shift">' +
+      (canPick ? '<label class="fl">' + L("الإداري", "Clerk") + '<select name="w">' + clerks.map(function (x) { return '<option value="' + x.id + '"' + (x.id === who.id ? " selected" : "") + ">" + esc(x.full_name) + " — " + roleName(x.role) + "</option>"; }).join("") + "</select></label>" : "") +
+      '<label class="fl">' + L("من", "From") + '<input type="datetime-local" name="f" value="' + dtVal(from) + '"></label>' +
+      '<label class="fl">' + L("إلى", "To") + '<input type="datetime-local" name="t" value="' + dtVal(to) + '"></label>' +
+      "<button>" + L("عرض", "Show") + "</button>" +
+      '<a class="pbtn" href="' + link("stats", { v: "shift", w: who.id }) + '">' + L("الزام الحالي", "Current shift") + "</a></form>" +
       approveBar(key, canOk, ok, L("اعتماد وطباعة تقرير الزام", "Approve & print shift report")) +
+      '<div class="sbar share noprint"><button type="button" class="pbtn" data-act="shift-copy">📋 ' + L("نسخ التقرير", "Copy report") + "</button>" +
+      '<button type="button" class="wa sm" data-act="shift-wa">' + L("إرسال واتساب", "Send on WhatsApp") + "</button>" +
+      '<button type="button" class="pbtn" data-act="shift-save">💾 ' + L("حفظ التقرير (ملف نصي)", "Save report (text file)") + "</button></div>" +
       '<div class="rep">' + letterhead(L("تاريخ الإصدار", "Issued on")) +
-      '<div class="rt"><h1>' + L("تقرير الزام", "Shift Report") + "</h1><p>" + esc(who.full_name) + " — " + L("من دخول الزام إلى خروجه", "from shift start to shift end") + " (" + hrs + L(" ساعة", " h") + ")</p></div>" +
-      rinfo([[L("الموظف", "Employee"), esc(nameLine(who)) + " <small>(" + roleName(who.role) + ")</small>"],
-        [L("دخول الزام", "Shift start"), dLong(from)], [L("خروج الزام", "Shift end"), dLong(to)],
-        [L("حالة الزام", "Roster status"), ro ? (onD ? '<span class="ok">🟢 ' + L("مداوم", "On duty") + "</span>" : '<span class="offd">🔴 ' + L("غير مداوم", "Off duty") + "</span>") : '<span class="muted">' + L("غير مُدرج في الزام", "Not on the roster") + "</span>"]]) +
+      '<div class="rt"><h1>' + L("تقرير الزام", "Shift Report") + "</h1><p>" + esc(who.full_name) + " — " + dur + "</p></div>" +
+      rinfo([[L("الإداري", "Clerk"), esc(nameLine(who)) + " <small>(" + roleName(who.role) + ")</small>"],
+        [L("من", "From"), dLong(from)], [L("إلى", "To"), dLong(to)],
+        [L("حالة الزام (يوم البداية)", "Roster status (start day)"), ro ? (onD ? '<span class="ok">🟢 ' + L("مداوم", "On duty") + "</span>" : '<span class="offd">🔴 ' + L("غير مداوم", "Off duty") + "</span>") : '<span class="muted">' + L("غير مُدرج في الزام", "Not on the roster") + "</span>"]]) +
       skp([["list", acts.length, L("إجمالي الإجراءات", "Total actions"), "c-navy"], ["file", Object.keys(docs).length, L("كتب تم التعامل معها", "Documents handled"), "c-purple"],
         ["check", c[1], L("اعتماد", "Approvals"), "c-green"], ["x", c[2], L("رفض", "Rejections"), "c-red"], ["sliders", c[3], L("تم عمل اللازم", "Completed"), "c-blue"], ["bell", c[4], L("طلب متابعة", "Follow-ups"), "c-orange"]]) +
-      '<section class="spanel"><h3>' + ic("history") + L("سجل الإجراءات خلال الزام", "Actions during the shift") + '</h3><div class="tw"><table class="ltab"><thead><tr><th>#</th><th>' + L("اليوم والوقت", "Day & time") + "</th><th>" + L("الإجراء", "Action") + "</th><th>" +
+      '<section class="spanel"><h3>' + ic("history") + L("سجل الإجراءات خلال الفترة", "Actions in this period") + '</h3><div class="tw"><table class="ltab"><thead><tr><th>#</th><th>' + L("اليوم والوقت", "Day & time") + "</th><th>" + L("الإجراء", "Action") + "</th><th>" +
       L("رقم الصادر", "Outgoing no.") + "</th><th>" + L("صاحب الطلب", "Requester") + "</th><th>" + L("نوع الطلب", "Type") + "</th></tr></thead><tbody>" +
-      (rows || '<tr><td colspan="6">' + L("لا توجد إجراءات مسجلة خلال هذا الزام.", "No actions recorded during this shift.") + "</td></tr>") + "</tbody></table></div></section>" +
+      (rows || '<tr><td colspan="6">' + L("لا توجد إجراءات مسجلة خلال هذه الفترة.", "No actions recorded in this period.") + "</td></tr>") + "</tbody></table></div></section>" +
       signBlock(ok, L("اعتماد تقرير الزام", "Shift report approved")) + repFoot() + "</div>";
+  }
+  function copyText(t, btn) {
+    var done = function () { if (btn) { var o = btn.innerHTML; btn.innerHTML = "✔ " + L("تم النسخ", "Copied"); setTimeout(function () { btn.innerHTML = o; }, 1800); } };
+    var fallback = function () {
+      var ta = document.createElement("textarea"); ta.value = t; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); done(); } catch (e) {} document.body.removeChild(ta);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done, fallback); else fallback();
   }
 
   /* ---------- زام الإداري (مدير النظام) ---------- */
@@ -1504,6 +1548,13 @@
     else if (act === "print-req") { var pr = reqById(+b.dataset.id); if (pr && u0 && canSee(u0, pr)) { closeModal(); printReq(pr); } }
     else if (act === "print-list") printList();
     else if (act === "open-req") { var orq = reqById(+b.dataset.id); if (orq && u0 && canSee(u0, orq)) openReq(orq); }
+    else if (act === "shift-copy") copyText(lastShift.text, b);
+    else if (act === "shift-wa") window.open("https://wa.me/?text=" + encodeURIComponent(lastShift.text), "_blank", "noopener");
+    else if (act === "shift-save") {
+      var blob = new Blob(["\ufeff" + lastShift.text], { type: "text/plain;charset=utf-8" }), a2 = document.createElement("a");
+      a2.href = URL.createObjectURL(blob); a2.download = lastShift.name; document.body.appendChild(a2); a2.click();
+      setTimeout(function () { URL.revokeObjectURL(a2.href); a2.remove(); }, 500);
+    }
     else if (act === "duty-del" && u0 && u0.role === "s") {
       var D0 = load(), de = D0.roster.filter(function (x) { return x.id === +b.dataset.id; })[0];
       if (de && confirm(L("حذف " + dutyName(de) + " من زام الإداري؟", "Remove " + dutyName(de) + " from the duty roster?"))) {
@@ -1514,7 +1565,7 @@
     else if (act === "stat-ok" && u0 && ("ams".indexOf(u0.role) >= 0 || (u0.role === "h" && b.dataset.key.indexOf("shift|") === 0))) {
       var sk = b.dataset.key.split("|"), se = +sk[1] ? userById(+sk[1]) : null;
       statTemp = { key: b.dataset.key, by: u0.id, at: new Date().toISOString() };
-      log("stat", null, (sk[0] === "shift" ? L("تقرير الزام اليومي", "Daily shift report") + " " + sk[2] : T(PER[sk[0]] || ["", ""])) + " — " + (se ? se.full_name : L("جميع الموظفين", "All employees"))); save();
+      log("stat", null, (sk[0] === "shift" ? L("تقرير الزام", "Shift report") + " " + (sk[2] || "").replace("T", " ") + L(" إلى ", " to ") + (sk[3] || "").replace("T", " ") : T(PER[sk[0]] || ["", ""])) + " — " + (se ? se.full_name : L("جميع الموظفين", "All employees"))); save();
       render();
       setTimeout(function () { window.print(); }, 350); // الختم يظهر بالطباعة، وبعدها يرجع التقرير طبيعي
     }

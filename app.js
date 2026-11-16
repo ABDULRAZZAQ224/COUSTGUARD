@@ -90,7 +90,7 @@
   }
   function routeTxt(u) {
     var z = (u || {}).zam || "m";
-    return /^[123]$/.test(z) ? L("يعتمد " + zcmdName(z) + " هذا الطلب، ثم يُحال إلى الإداري للتنفيذ.", zcmdName(z) + " approves this request, then it goes to the clerk for execution.")
+    return /^[123]$/.test(z) ? L("يعتمد " + zcmdName(z) + " هذا الطلب أولًا، ثم يعتمده الإداري وينفّذه.", zcmdName(z) + " approves this request first, then the clerk approves and executes it.")
       : L("يعتمد الإداريُّ هذا الطلب.", "The administrative clerk approves this request.");
   }
   function avaHtml(u, title) { return '<span class="ava"' + (title ? ' title="' + esc(title) + '"' : "") + ">" + (u && u.photo ? '<img src="' + u.photo + '" alt="">' : ic("user")) + "</span>"; }
@@ -163,11 +163,11 @@
   /* ---------- أمر الزام: اعتماد طلبات موظفي زامه ثم تحويلها للإداري للتنفيذ ---------- */
   function viewZam(q, u) {
     var base = load().reqs.filter(function (r) { return !isPro(r) && inZam(r) && (u.role !== "z" || zamOf(r) === u.zam_cmd); });
-    var intro = '<p class="msg">' + (u.role === "z" ? L("طلبات موظفي ", "Requests from ") + T(ZAMS[u.zam_cmd]) + L(" — اعتمادك يُحيل الطلب إلى الإداري للتنفيذ.", " — your approval sends the request to the clerk for execution.")
+    var intro = '<p class="msg">' + (u.role === "z" ? L("طلبات موظفي ", "Requests from ") + T(ZAMS[u.zam_cmd]) + L(" — بعد اعتمادك يُحال الطلب إلى الإداري لاعتماده وتنفيذه.", " — after your approval the request goes to the clerk for approval and execution.")
       : L("طلبات موظفي الزامات الثلاثة (اعتمادك يكون بالنيابة عن أمر الزام).", "Requests from all three shifts (you approve on behalf of the shift commander).")) + "</p>";
     return listView("zam", u, q, base, "w", [
       ["w", L("بانتظار اعتمادك", "Awaiting your approval"), function (r) { return stage(r) === "cmd"; }, true],
-      ["ok", L("معتمد", "Approved"), function (r) { return r.status === "a"; }, true],
+      ["ok", L("اعتمدتَها", "Approved by you"), function (r) { return !!r.cmd_by && r.status !== "r"; }, true],
       ["r", L("مرفوض", "Rejected"), function (r) { return r.status === "r"; }, true],
       ["all", L("الكل", "All"), ALL]
     ], "zam", intro);
@@ -177,8 +177,8 @@
     if (!r || stage(r) !== "cmd" || !canAct(who, r)) return render();
     if (act === "r" && !why) { flash("err", L("يجب كتابة سبب الرفض", "A rejection reason is required")); return render(); }
     if (act === "a") {
-      r.cmd_by = who.id; r.cmd_at = now; r.status = "a";
-      log("cmd_ok", r.id); flash("ok", L("تم اعتماد الطلب رقم الصادر " + r.ref + "، وأُحيل إلى الإداري للتنفيذ.", "Request " + r.ref + " approved and sent to the clerk for execution."));
+      r.cmd_by = who.id; r.cmd_at = now; // يبقى قيد الاعتماد ويُحال إلى الإداري ليعتمده ثم ينفّذه
+      log("cmd_ok", r.id); flash("ok", L("تم اعتماد الطلب رقم الصادر " + r.ref + "، وأُحيل إلى الإداري لاعتماده وتنفيذه.", "Request " + r.ref + " approved and sent to the clerk for approval and execution."));
     } else {
       r.status = "r"; r.reject_reason = why; r.decided_by = who.id; r.decided_at = now; r.dec_role = "cmd";
       log("cmd_rej", r.id); flash("ok", L("تم رفض الطلب رقم الصادر " + r.ref, "Request " + r.ref + " rejected"));
@@ -1233,7 +1233,7 @@
     if (sg === "exec") return r.followups.length ? ["f", L("يرجى المتابعة", "Follow-up needed")] : mode === "queue" ? ["y", L("بانتظار التنفيذ", "To execute")] : ["g", L("معتمد", "Approved")];
     if (sg === "pro") return ["y", mode === "pro" ? L("بانتظار اعتمادك", "Awaiting your approval") : L("بانتظار مسؤول المهنيين", "With Professionals Officer")];
     if (sg === "cmd") return ["y", mode === "zam" ? L("بانتظار اعتمادك", "Awaiting your approval") : L("بانتظار ", "With ") + zcmdName(zamOf(r))];
-    return ["y", mode === "queue" ? L("بانتظار اعتمادك", "Awaiting your approval") : L("بانتظار اعتماد الإداري", "With admin clerk")];
+    return ["y", mode === "queue" ? L("بانتظار اعتمادك", "Awaiting your approval") : mode === "zam" && r.cmd_by ? L("اعتمدتَه — لدى الإداري", "Approved by you — with clerk") : L("بانتظار اعتماد الإداري", "With admin clerk")];
   }
   // رسالة واتساب جاهزة للموظف (أرقام الكويت 8 خانات + 965)
   function waLink(r, u) {

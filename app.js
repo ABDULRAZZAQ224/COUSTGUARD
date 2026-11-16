@@ -81,7 +81,9 @@
   // أنظمة العمل: الدوام الصباحي أو أحد الزامات الثلاثة — ولكل زام «أمر زام» يعتمد طلبات موظفيه
   var ZAMS = { m: ["الدوام الصباحي", "Morning shift"], "1": ["الزام الأول", "First shift"], "2": ["الزام الثاني", "Second shift"], "3": ["الزام الثالث", "Third shift"] };
   function zcmdName(n) { return L("أمر ", "Commander, ") + T(ZAMS[n] || ZAMS["1"]); }
-  function roleOf(u) { return u && u.role === "z" ? zcmdName(u.zam_cmd) : roleName(u && u.role); }
+  function roleOf(u) { return u && u.role === "z" ? (u.asst ? L("مساعد ", "Assistant ") : "") + zcmdName(u.zam_cmd) : roleName(u && u.role); }
+  // المسمى الوظيفي قبل الاسم (مثل: مهندس اختصاص أول فهد الشيتان)
+  function titleName(u) { return u ? ((u.job_title ? u.job_title + " " : "") + u.full_name) : ""; }
   function zamOf(r) { var u = db && userById(r.user_id); return u ? u.zam || "m" : "m"; }
   function inZam(r) { return /^[123]$/.test(zamOf(r)); }
   var PRO_BLOCK = ["perm", "leave", "med", "ext"]; // غير متاحة للمهنيين
@@ -97,7 +99,7 @@
 
   /* ---------- حجز مقابلة رئيس القسم: مقابلتان في اليوم، 8:00–11:30، بدون الجمعة والسبت والثلاثاء ---------- */
   var MEET_SLOTS = ["08:00", "08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30"];
-  var MEET_MAX = 2, MEET_LEAD = 1, MEET_SPAN = 30, MEET_OFF = [2, 5, 6]; // أقرب موعد = اليوم التالي، والحجز خلال شهر
+  var MEET_MAX = 2, MEET_LEAD = 2, MEET_SPAN = 30, MEET_OFF = [2, 5, 6]; // أقرب موعد = اليوم التالي، والحجز خلال شهر
   function meetBooked(day) { return load().reqs.filter(function (r) { return r.kind === "meet" && r.status !== "r" && r.date_from === day; }); }
   function meetRange() { var t = new Date(), a = new Date(t.getFullYear(), t.getMonth(), t.getDate() + MEET_LEAD); return [a, addDays(a, MEET_SPAN)]; }
   function meetDay(d) {
@@ -133,8 +135,8 @@
   function meetForm(u, e, v, c) {
     return '<form class="box" data-f="req"><div class="fh"><b>🤝 ' + L("حجز مقابلة رئيس القسم", "Book a meeting with the Head of Department") + '</b><a href="' + link("my", { c: c }) + '">✕ ' + L("إغلاق", "Close") + "</a></div>" +
       '<input type="hidden" name="kind" id="f_kind" value="meet"><input type="hidden" name="meet_with" value="head">' +
-      '<p class="msg">' + L("المقابلة مع: <b>رئيس القسم</b> — مقابلتان فقط في اليوم، من 8:00 حتى 11:30 صباحًا، أيام الأحد والإثنين والأربعاء والخميس، وأقرب موعد اليوم التالي.",
-        "Meeting with: <b>Head of Department</b> — only two meetings a day, 8:00–11:30 am, on Sunday, Monday, Wednesday and Thursday; the earliest date is tomorrow.") + "</p>" +
+      '<p class="msg">' + L("المقابلة مع: <b>رئيس القسم</b> — مقابلتان فقط في اليوم، من 8:00 حتى 11:30 صباحًا، أيام الأحد والإثنين والأربعاء والخميس، وأقرب موعد بعد يومين من اليوم (مثلًا يوم 16 ← أقرب موعد 18).",
+        "Meeting with: <b>Head of Department</b> — only two meetings a day, 8:00–11:30 am, on Sunday, Monday, Wednesday and Thursday; the earliest date is two days from today (e.g. on the 16th → the 18th).") + "</p>" +
       '<p class="sub" id="route-hint">' + routeTxt(u) + '</p><p class="sub" id="pro-hint" hidden>' + L("يُحال هذا الطلب إلى مسؤول المهنيين لاعتماده.", "This request goes to the Professionals Officer for approval.") + "</p>" +
       '<div id="meet-pick">' + meetPicker(v.date_from || "", v.time_from || "") + "</div>" + errHtml(e, "date_from") + errHtml(e, "time_from") +
       field("meet_reason", L("سبب المقابلة (إلزامي)", "Reason for the meeting (required)"), { type: "textarea", rows: "3", maxlength: "500" }, e, v.meet_reason) +
@@ -144,13 +146,28 @@
       '<p><button class="p">' + L("حجز الموعد", "Book the appointment") + "</button></p></form>";
   }
   // رئيس القسم ومدير النظام: عرض الحجوزات وإغلاق أيام معيّنة
-  function viewMeetCal() {
+  // حجوزات جديدة لم يطّلع عليها رئيس القسم / مدير النظام بعد
+  function newMeets(u) {
+    if (!u || "hs".indexOf(u.role) < 0) return [];
+    var seen = (load().seenMeet || {})[u.id] || "";
+    return load().reqs.filter(function (r) { return r.kind === "meet" && r.status !== "r" && r.created > seen; });
+  }
+  function meetNote(u) {
+    var n = newMeets(u);
+    if (!n.length) return "";
+    return '<a class="mnote" href="#/meetcal">🔔 ' + L("لديك " + n.length + " حجز مقابلة جديد: ", "You have " + n.length + " new meeting booking(s): ") +
+      n.slice(0, 3).map(function (r) { return esc(uname(r.user_id)) + " (" + r.date_from + " " + r.time_from + ")"; }).join(L("، ", ", ")) + (n.length > 3 ? "…" : "") +
+      " — " + L("اضغط للاطلاع", "tap to view") + "</a>";
+  }
+  function viewMeetCal(q, u) {
+    var fresh = {}; newMeets(u).forEach(function (r) { fresh[r.id] = 1; });
+    if (u) { load().seenMeet[u.id] = new Date().toISOString(); save(); } // اطّلع على الحجوزات
     var t = new Date(), days = [], B = load().meetBlocks || {};
     for (var i = 0; i <= 45; i++) { var d = new Date(t.getFullYear(), t.getMonth(), t.getDate() + i); if (MEET_OFF.indexOf(d.getDay()) < 0) days.push(d); }
     var rows = days.map(function (d) {
       var s = ymd(d), bk = meetBooked(s).sort(function (a, b) { return a.time_from < b.time_from ? -1 : 1; }), bl = B[s];
       return "<tr" + (bl ? ' class="blk"' : "") + "><td><b>" + T(WD[d.getDay()]) + "</b> " + s + "</td><td>" +
-        (bk.length ? bk.map(function (r) { return '<span class="mbk">' + esc(r.time_from) + " — " + esc(uname(r.user_id)) + ' <button type="button" class="lnk inl" data-act="open-req" data-id="' + r.id + '">' + esc(r.ref) + "</button></span>"; }).join("") : '<span class="muted">—</span>') +
+        (bk.length ? bk.map(function (r) { return '<span class="mbk' + (fresh[r.id] ? " new" : "") + '">' + (fresh[r.id] ? "🆕 " : "") + esc(r.time_from) + " — " + esc(titleName(userById(r.user_id))) + ' <button type="button" class="lnk inl" data-act="open-req" data-id="' + r.id + '">' + esc(r.ref) + "</button></span>"; }).join("") : '<span class="muted">—</span>') +
         "</td><td>" + (bl ? '<span class="offd">🔒 ' + L("مغلق", "Closed") + "</span>" : bk.length >= MEET_MAX ? '<span class="chip">' + L("مكتمل", "Full") + "</span>" : '<span class="ok">' + L("متاح", "Open") + " (" + (MEET_MAX - bk.length) + ")</span>") +
         '</td><td><button type="button" class="pbtn' + (bl ? "" : " del") + '" data-act="mblock" data-d="' + s + '">' + (bl ? "🔓 " + L("فتح اليوم", "Open day") : "🔒 " + L("إغلاق اليوم", "Close day")) + "</button></td></tr>";
     }).join("");
@@ -297,11 +314,14 @@
       [9, "pemp", "e", "راشد حمد الديحاني", "مهني كهرباء", ""],
       [10, "zam1", "z", "بدر فيصل العنزي", "أمر الزام الأول", "نقيب", "1"],
       [11, "zam2", "z", "حمد ناصر المري", "أمر الزام الثاني", "نقيب", "2"],
-      [12, "zam3", "z", "يوسف خالد الصباح", "أمر الزام الثالث", "ملازم أول", "3"]
+      [12, "zam3", "z", "يوسف خالد الصباح", "أمر الزام الثالث", "ملازم أول", "3"],
+      [13, "asst1", "z", "مشعل عادل الرشيدي", "مساعد أمر الزام الأول", "ملازم", "1", 1],
+      [14, "asst2", "z", "عبدالعزيز سعد الهاجري", "مساعد أمر الزام الثاني", "ملازم", "2", 1],
+      [15, "asst3", "z", "طلال محمد العجمي", "مساعد أمر الزام الثالث", "ملازم", "3", 1]
     ].map(function (x) {
       return { id: x[0], username: x[1], password: "123456", role: x[2], full_name: x[3], job_title: x[4], rank: x[5],
                civil_id: "2900101000" + pad(x[0]), phone: "5" + ("000000" + x[0]).slice(-7), duty: x[0] === 4 ? ymd(t) : "", pro: x[0] === 9,
-               zam: x[0] === 6 ? "1" : "m", zam_cmd: x[6] || "", mil_no: x[0] === 9 ? "45127" : "", photo: "" };
+               zam: x[0] === 6 ? "1" : "m", zam_cmd: x[6] || "", asst: !!x[7], mil_no: x[0] === 9 ? "45127" : "", photo: "" };
     });
     function R(o) {
       return Object.assign({ date_to: "", depart_date: "", time_from: "", time_to: "", meet_with: "", meet_reason: "", perm_period: "", notes: "", med: "", secret: "",
@@ -328,7 +348,7 @@
       { id: 2, uid: 8, name: "", phone: "", mode: "cycle", days: [], on: 1, off: 1, start: d(1) },
       { id: 3, uid: 1, name: "", phone: "", mode: "week", days: [0, 1, 2, 3, 4], on: 1, off: 0, start: d(0) }
     ];
-    var D = { users: u, reqs: reqs, roster: roster, audit: [], statOk: {}, seq: { u: 13, r: 12, out: {}, d: 4 }, meetBlocks: {}, seeded: now };
+    var D = { users: u, reqs: reqs, roster: roster, audit: [], statOk: {}, seq: { u: 16, r: 12, out: {}, d: 4 }, meetBlocks: {}, seenMeet: {}, seeded: now };
     reqs.slice().sort(function (a, b) { return a.created < b.created ? -1 : 1; }).forEach(function (r) { r.ref = nextRef(D, r.created); });
     // سجل عمليات تجريبي مبني على الطلبات (للتنبيهات وسجل العمليات)
     reqs.forEach(function (r) {
@@ -350,6 +370,7 @@
     if (!db.seq.out) db.seq.out = {};
     db.users.forEach(function (u) { if (u.pro === undefined) u.pro = u.role === "e" && proTitle(u.job_title); if (!u.zam) u.zam = "m"; });
     if (!db.meetBlocks) db.meetBlocks = {};
+    if (!db.seenMeet) db.seenMeet = {};
     if (!db.roster) { // ترقية: أنشئ زام الإداري من الإداريين الحاليين
       var t0 = today(), t1 = ymd(addDays(new Date(), 1));
       db.roster = db.users.filter(function (u) { return u.role === "a"; }).map(function (u, i) {
@@ -524,9 +545,9 @@
     var R = load().reqs, n = function (f) { return R.filter(f).length; };
     var c = { clerk: n(function (r) { return stage(r) === "clerk"; }), exec: n(function (r) { return stage(r) === "exec"; }), pro: n(function (r) { return stage(r) === "pro"; }),
               pending: n(function (r) { return r.status === "p"; }), mine: n(function (r) { return r.user_id === u.id && r.status === "p"; }),
-              cmd: n(function (r) { return stage(r) === "cmd" && (u.role !== "z" || zamOf(r) === u.zam_cmd); }) };
-    c.bell = { e: c.mine, m: c.pro, h: c.pending, o: c.pending, a: c.clerk + c.exec, s: c.clerk + c.exec + c.pro + c.cmd, z: c.cmd }[u.role] || 0;
-    c.bellHref = { e: "#/my", m: "#/pro?f=w", h: "#/review?f=p", o: "#/review?f=p", a: "#/queue?f=w", s: "#/queue?f=w", z: "#/zam?f=w" }[u.role];
+              cmd: n(function (r) { return stage(r) === "cmd" && (u.role !== "z" || zamOf(r) === u.zam_cmd); }), meet: newMeets(u).length };
+    c.bell = { e: c.mine, m: c.pro, h: c.pending + c.meet, o: c.pending, a: c.clerk + c.exec, s: c.clerk + c.exec + c.pro + c.cmd + c.meet, z: c.cmd }[u.role] || 0;
+    c.bellHref = c.meet ? "#/meetcal" : { e: "#/my", m: "#/pro?f=w", h: "#/review?f=p", o: "#/review?f=p", a: "#/queue?f=w", s: "#/queue?f=w", z: "#/zam?f=w" }[u.role];
     return c;
   }
   function mainHref(u) { return { e: "#/my", m: "#/pro", h: "#/review", o: "#/review", a: "#/queue?f=w", s: "#/queue?f=w", z: "#/zam?f=w" }[u.role]; }
@@ -535,7 +556,7 @@
       '<a class="brand" href="#/home">' + logos() + '<span><b>' + T(ORG) + "</b><small>" + T(DEPT) + "</small></span></a>" +
       '<div class="tinfo"><span class="ti">' + ic("clock") + '<b id="clk">' + hm() + '</b></span><span class="ti">' + ic("calendar") + '<b id="dte">' + dateLong() + "</b></span>" +
       '<a class="bell" href="' + c.bellHref + '" title="' + L("بانتظار إجراء", "Awaiting action") + '">' + ic("bell") + (c.bell ? "<i>" + c.bell + "</i>" : "") + "</a>" +
-      '<span class="who"><small>' + L("أهلًا وسهلًا", "Welcome") + "</small><b>" + esc(u.full_name) + "</b></span>" +
+      '<span class="who"><small>' + L("أهلًا وسهلًا", "Welcome") + "</small><b>" + esc(titleName(u)) + "</b></span>" +
       avaHtml(u, roleOf(u)) + "</div></header>";
   }
   function sideNav(u, r, c) {
@@ -545,7 +566,7 @@
       return '<a href="' + href + '"' + (on ? ' class="on"' : "") + ">" + ic(icon) + "<span>" + label + "</span>" + (badge ? '<i class="bdg">' + badge + "</i>" : "") + "</a>";
     }
     function group(title, items) { var h = items.join(""); return h ? '<div class="sg"><h4>' + title + "</h4>" + h + "</div>" : ""; }
-    return '<div class="sh-in"><div class="side-who">' + avaHtml(u) + "<span><b>" + esc(u.full_name) + "</b><small>" + roleOf(u) + "</small></span></div>" +
+    return '<div class="sh-in"><div class="side-who">' + avaHtml(u) + "<span><b>" + esc(titleName(u)) + "</b><small>" + roleOf(u) + "</small></span></div>" +
       item("#/home", L("الرئيسية", "Home"), "home", "emhoasz", 0, cur === "home") +
       group(L("إدارة الطلبات", "Requests"), [
         item("#/my", L("طلباتي", "My requests"), "file", "emhoasz", 0, cur === "my"),
@@ -558,7 +579,7 @@
       group(L("إدارة الموظفين", "Staff"), [
         item("#/users", L("الموظفون والصلاحيات", "Staff & permissions"), "users", "s", 0, cur === "users"),
         item("#/duty", L("زام الإداري", "Duty roster"), "calendar", "s", 0, cur === "duty"),
-        item("#/meetcal", L("مواعيد المقابلات", "Meeting calendar"), "calendar", "hs", 0, cur === "meetcal")
+        item("#/meetcal", L("مواعيد المقابلات", "Meeting calendar"), "calendar", "hs", c.meet, cur === "meetcal")
       ]) +
       group(L("التقارير والإدارة", "Reports & admin"), [
         item("#/stats", L("الإحصائيات والتقارير", "Statistics & reports"), "chart", "mhoas", 0, cur === "stats"),
@@ -641,7 +662,7 @@
       ["#/my", "file", L("طلباتي", "My requests"), L("حالة طلباتك وأختامها", "Your requests and stamps"), "emhoasz"]
     ].filter(function (x) { return x[4].indexOf(u.role) >= 0 && !(u.pro && x[0] === "#/my?new=ext"); }).slice(0, 5);
     return '<section class="hero-b"><div><span class="hb-org">' + T(ORG) + '</span><span class="hb-dept">' + T(DEPT) + "</span><h1>" + L("مرحبًا بك في النظام الإلكتروني", "Welcome to the electronic system") +
-      '</h1><p class="slogan">' + T(SLOGAN) + "</p><p>" + esc(u.full_name) + " — " + roleOf(u) + "</p></div></section>" +
+      '</h1><p class="slogan">' + T(SLOGAN) + "</p><p>" + esc(titleName(u)) + " — " + roleOf(u) + "</p></div></section>" + meetNote(u) +
       '<div class="kpis">' + K4.map(function (k) {
         return '<a class="kpi ' + k[0] + '" href="' + k[4] + '"><span class="kic">' + ic(k[1]) + "</span><span><b>" + k[2] + "</b><small>" + k[3] + "</small></span></a>";
       }).join("") + "</div>" +
@@ -763,6 +784,7 @@
       '<form data-f="login">' + (s.errs ? '<p class="err">' + esc(s.errs) + "</p>" : "") +
       field("username", L("اسم المستخدم (الرقم المدني)", "Username (Civil ID)"), { autocomplete: "username", required: "", dir: "auto" }, null, s.val.username) +
       '<p class="note-u">📌 ' + L("اسم المستخدم هو <b>رقمك المدني</b> (12 رقمًا).", "Your username is your <b>Civil ID</b> (12 digits).") + "</p>" +
+      '<div id="who-prev">' + whoPrev(s.val.username) + "</div>" +
       field("password", L("كلمة المرور", "Password"), { type: "password", autocomplete: "current-password", required: "" }) +
       '<button class="p wide">' + L("دخول", "Sign in") + '</button><a class="btn-out" href="#/register">' + L("موظف جديد؟ سجّل حسابك", "New employee? Create an account") + "</a></form>" +
       (demo.length ? '<div class="demo-box"><p>' + L("حسابات تجريبية (كلمة المرور <b>123456</b>) — اضغط للدخول مباشرة:", "Demo accounts (password <b>123456</b>) — tap to sign in:") + '</p><div class="demo-users">' + demo.map(function (u) {
@@ -770,6 +792,16 @@
       }).join("") + "</div></div>" : "") +
       '<p class="note">' + L("نسخة تجريبية — أي بيانات أو طلبات تُدخلها هنا تُحفظ في هذا المتصفح فقط.", "Demo version — anything you enter here is saved in this browser only.") +
       "</p></div>";
+  }
+  // بطاقة تعريف تظهر عند كتابة الرقم المدني (أو اسم المستخدم): الصورة والاسم والمسمى
+  function findUser(v) {
+    var nm = (v || "").trim().toLowerCase(), cid = enDigits(v || "");
+    if (!nm) return null;
+    return load().users.filter(function (x) { return x.username.toLowerCase() === nm || (cid.length === 12 && x.civil_id === cid); })[0] || null;
+  }
+  function whoPrev(v) {
+    var u = findUser(v);
+    return u ? '<div class="wprev">' + avaHtml(u) + "<span><b>" + esc(u.full_name) + "</b><small>" + esc(u.job_title) + (u.rank ? " — " + esc(u.rank) + "" : "") + "</small></span></div>" : "";
   }
   function authHead(icon, title, sub) {
     return '<div class="auth-h">' + ic(icon) + "<div><h2>" + title + "</h2><p>" + sub + "</p></div></div>";
@@ -1214,7 +1246,9 @@
         if (can) h += (isAdm ? '<p class="wait">✍️ ' + L("اعتمادك هنا بالنيابة عن ", "You approve here on behalf of ") + zcmdName(zamOf(r)) + "</p>" : "") + decideForm("cmd", r.id, L("اعتماد", "Approve"));
         else h += '<p class="wait">⏳ ' + L("بانتظار اعتماد ", "Awaiting ") + zcmdName(zamOf(r)) + "</p>";
       } else if (sg === "clerk") {
-        if (can) h += decideForm("decide", r.id, L("اعتماد", "Approve"));
+        if (r.cmd_by) h += '<p class="cmdok">✔ ' + L("اعتمده ", "Approved by ") + roleOf(userById(r.cmd_by)) + " — " + esc(uname(r.cmd_by)) + " (" + ymdhm(r.cmd_at) + ")" +
+          L(" · يعتمد الإداري بناءً على اعتماده", " · the clerk approves based on it") + "</p>";
+        if (can) h += decideForm("decide", r.id, r.cmd_by ? L("اعتماد بناءً على اعتماد أمر الزام", "Approve (per shift commander)") : L("اعتماد", "Approve"));
         else h += '<p class="wait">⏳ ' + L("بانتظار اعتماد الإداري", "Awaiting the administrative clerk") + "</p>";
       } else if (sg === "exec" && mode === "queue" && can) {
         if (r.secret) h += "<p>" + L("الرقم السري: ", "Secret number: ") + '<span id="s' + r.id + '">••••••</span> <button type="button" class="s" data-act="reveal" data-id="' + r.id + '">' + L("إظهار", "Show") + "</button></p>";
@@ -1648,10 +1682,11 @@
       L("الصلاحية", "Role") + "</th><th>" + L("الختم", "Stamp") + "</th><th></th></tr></thead><tbody>" + rows + "</tbody></table></div>";
   }
   function roleOpts() {
-    return { e: roleName("e"), m: roleName("m"), h: roleName("h"), o: roleName("o"), a: roleName("a"), z1: zcmdName("1"), z2: zcmdName("2"), z3: zcmdName("3") };
+    return { e: roleName("e"), m: roleName("m"), h: roleName("h"), o: roleName("o"), a: roleName("a"), z1: zcmdName("1"), z2: zcmdName("2"), z3: zcmdName("3"),
+      y1: L("مساعد ", "Assistant ") + zcmdName("1"), y2: L("مساعد ", "Assistant ") + zcmdName("2"), y3: L("مساعد ", "Assistant ") + zcmdName("3") };
   }
   function userEditForm(u) {
-    var s = editState, e = s.errs, v = s.val && s.val.id === u.id ? s.val : Object.assign({}, u, { role: u.role === "z" ? "z" + u.zam_cmd : u.role });
+    var s = editState, e = s.errs, v = s.val && s.val.id === u.id ? s.val : Object.assign({}, u, { role: u.role === "z" ? (u.asst ? "y" : "z") + u.zam_cmd : u.role });
     editState = { errs: {}, val: null };
     return '<form class="box uedit" data-f="useredit" data-id="' + u.id + '"><div class="fh"><b>✏️ ' + L("تعديل بيانات: ", "Edit: ") + esc(u.full_name) + '</b><a href="#/users">✕ ' + L("إغلاق", "Close") + "</a></div>" +
       '<div class="uphoto">' + avaHtml(u) + field("photo", L("تغيير الصورة الشخصية", "Change profile photo"), { type: "file", accept: "image/*" }, e) + "</div>" +
@@ -1684,8 +1719,8 @@
       u.full_name = d.full_name.replace(/\s+/g, " "); u.rank = d.rank || ""; u.job_title = d.job_title; u.username = d.username; u.phone = ph; u.civil_id = cid; u.pro = !!d.pro;
       u.mil_no = mil; u.zam = ZAMS[d.zam] ? d.zam : "m"; if (img) u.photo = img;
       if (u.role !== "s") {
-        if (/^z[123]$/.test(d.role)) { u.role = "z"; u.zam_cmd = d.role.charAt(1); u.job_title = "أمر " + ZAMS[u.zam_cmd][0]; } // المسمى يعطيه مدير النظام فقط
-        else { u.role = d.role; u.zam_cmd = ""; }
+        if (/^[zy][123]$/.test(d.role)) { u.role = "z"; u.zam_cmd = d.role.charAt(1); u.asst = d.role.charAt(0) === "y"; u.job_title = (u.asst ? "مساعد " : "") + "أمر " + ZAMS[u.zam_cmd][0]; } // المسمى يعطيه مدير النظام فقط
+        else { u.role = d.role; u.zam_cmd = ""; u.asst = false; }
       }
       if (d.password) u.password = d.password;
       log("user_edit", null, u.username); save();
@@ -1725,7 +1760,9 @@
       go(f.dataset.path + (qs ? "?" + qs : ""));
     }
   });
-  app.addEventListener("input", function (ev) { if (ev.target.id === "f_time_from") syncPermTime(); if (ev.target.id === "f_date_from") syncLate(); if (ev.target.id === "f_date_to") syncExt(); });
+  app.addEventListener("input", function (ev) {
+    if (ev.target.id === "f_username" && ev.target.form && ev.target.form.dataset.f === "login") { var wp = document.getElementById("who-prev"); if (wp) wp.innerHTML = whoPrev(ev.target.value); }
+    if (ev.target.id === "f_time_from") syncPermTime(); if (ev.target.id === "f_date_from") syncLate(); if (ev.target.id === "f_date_to") syncExt(); });
   app.addEventListener("change", function (ev) {
     var t = ev.target;
     if (t.id === "f_kind") toggleKind();

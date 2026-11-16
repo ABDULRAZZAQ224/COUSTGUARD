@@ -36,11 +36,12 @@
     pro: { t: ["المهنيين", "Professionals"], one: ["مهنيين", "Professionals"], icon: "🛠️", kinds: ["pleave", "pexit"], d: ["إجازة أو إذن مغادرة للمهنيين", "Leave or exit permit for professionals"] }
   };
   var ROLES = { e: ["موظف", "Employee"], m: ["مسؤول المهنيين", "Professionals Officer"], h: ["رئيس القسم", "Head of Department"],
-                o: ["ضابط القسم", "Section Officer"], a: ["إداري", "Administrative Clerk"], s: ["مدير النظام", "System Administrator"] };
+                o: ["ضابط القسم", "Section Officer"], a: ["إداري", "Administrative Clerk"], s: ["مدير النظام", "System Administrator"],
+                z: ["أمر الزام", "Shift commander"] };
   var PERIODS = { start: ["بداية الدوام", "Start of shift"], during: ["أثناء الدوام", "During shift"], end: ["نهاية الدوام", "End of shift"] };
   var MEET = { head: ["رئيس القسم", "Head of Department"], officer: ["ضابط القسم", "Section Officer"],
                dirdept: ["مدير الإدارة", "Department Director"], dirgen: ["المدير العام", "Director General"] };
-  var HOME = { e: "home", m: "home", h: "home", o: "home", a: "home", s: "home" };
+  var HOME = { e: "home", m: "home", h: "home", o: "home", a: "home", s: "home", z: "home" };
   var ORG = ["الإدارة العامة لخفر السواحل", "General Administration of Coast Guard"];
   var DEPT = ["قسم الكهرباء والإلكترونيات", "Electrical & Electronics Department"];
   var CREDIT = "Designed by ABDULRAZZAQ ALHAJRI";
@@ -77,6 +78,148 @@
     var u = db && userById(r.user_id); return !!(u && u.pro); // طلبات المهني تتبع مسؤول المهنيين
   }
   function proTitle(t) { return /مهني|مهنية|professional|technician/i.test(t || ""); }
+  // أنظمة العمل: الدوام الصباحي أو أحد الزامات الثلاثة — ولكل زام «أمر زام» يعتمد طلبات موظفيه
+  var ZAMS = { m: ["الدوام الصباحي", "Morning shift"], "1": ["الزام الأول", "First shift"], "2": ["الزام الثاني", "Second shift"], "3": ["الزام الثالث", "Third shift"] };
+  function zcmdName(n) { return L("أمر ", "Commander, ") + T(ZAMS[n] || ZAMS["1"]); }
+  function roleOf(u) { return u && u.role === "z" ? zcmdName(u.zam_cmd) : roleName(u && u.role); }
+  function zamOf(r) { var u = db && userById(r.user_id); return u ? u.zam || "m" : "m"; }
+  function inZam(r) { return /^[123]$/.test(zamOf(r)); }
+  var PRO_BLOCK = ["perm", "leave", "med", "ext"]; // غير متاحة للمهنيين
+  function approverName(u, pro) {
+    return pro ? L("مسؤول المهنيين", "the Professionals Officer") : /^[123]$/.test((u || {}).zam || "") ? zcmdName(u.zam) : L("الإداري", "the administrative clerk");
+  }
+  function routeTxt(u) {
+    var z = (u || {}).zam || "m";
+    return /^[123]$/.test(z) ? L("يعتمد " + zcmdName(z) + " هذا الطلب، ثم يُحال إلى الإداري للتنفيذ.", zcmdName(z) + " approves this request, then it goes to the clerk for execution.")
+      : L("يعتمد الإداريُّ هذا الطلب.", "The administrative clerk approves this request.");
+  }
+  function avaHtml(u, title) { return '<span class="ava"' + (title ? ' title="' + esc(title) + '"' : "") + ">" + (u && u.photo ? '<img src="' + u.photo + '" alt="">' : ic("user")) + "</span>"; }
+
+  /* ---------- حجز مقابلة رئيس القسم: مقابلتان في اليوم، 8:00–11:30، بدون الجمعة والسبت والثلاثاء ---------- */
+  var MEET_SLOTS = ["08:00", "08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30"];
+  var MEET_MAX = 2, MEET_LEAD = 1, MEET_SPAN = 30, MEET_OFF = [2, 5, 6]; // أقرب موعد = اليوم التالي، والحجز خلال شهر
+  function meetBooked(day) { return load().reqs.filter(function (r) { return r.kind === "meet" && r.status !== "r" && r.date_from === day; }); }
+  function meetRange() { var t = new Date(), a = new Date(t.getFullYear(), t.getMonth(), t.getDate() + MEET_LEAD); return [a, addDays(a, MEET_SPAN)]; }
+  function meetDay(d) {
+    var R = meetRange(), s = ymd(d);
+    if (d < R[0] || d > R[1]) return "out";
+    if (MEET_OFF.indexOf(d.getDay()) >= 0) return "off";
+    if ((load().meetBlocks || {})[s]) return "blocked";
+    if (meetBooked(s).length >= MEET_MAX) return "full";
+    return "open";
+  }
+  function meetPicker(sel, t) {
+    var R = meetRange(), cells = [];
+    for (var d = addDays(R[0], -R[0].getDay()); d <= R[1] || d.getDay() !== 0; d = addDays(d, 1)) cells.push(d);
+    var grid = '<div class="mcal"><div class="mhd">' + WD.map(function (w) { return "<span>" + T(w) + "</span>"; }).join("") + '</div><div class="mgrid">' +
+      cells.map(function (d, i) {
+        var s = ymd(d), st = meetDay(d), left = st === "open" ? MEET_MAX - meetBooked(s).length : 0;
+        var lab = st === "open" ? L("متاح ", "Open ") + left : st === "full" ? L("مكتمل", "Full") : st === "blocked" ? L("مغلق", "Closed") : st === "off" ? L("لا مقابلات", "No meetings") : "";
+        var inner = "<b>" + d.getDate() + "</b><small>" + (d.getDate() === 1 || i === 0 ? T(MON[d.getMonth()]) : "&nbsp;") + "</small><i>" + lab + "</i>";
+        return st === "open" ? '<button type="button" class="mc open' + (s === sel ? " on" : "") + '" data-act="mday" data-d="' + s + '">' + inner + "</button>" : '<span class="mc ' + st + '">' + inner + "</span>";
+      }).join("") + "</div></div>";
+    var slots = "";
+    if (sel && meetDay(parseDate(sel)) === "open") {
+      var taken = meetBooked(sel).map(function (r) { return r.time_from; });
+      slots = '<div class="mslots"><p><b>' + L("اختر الوقت — ", "Pick a time — ") + T(WD[parseDate(sel).getDay()]) + " " + sel + "</b></p>" + MEET_SLOTS.map(function (x) {
+        var tk = taken.indexOf(x) >= 0;
+        return '<button type="button" class="ms' + (x === t && !tk ? " on" : "") + '"' + (tk ? " disabled" : "") + ' data-act="mslot" data-t="' + x + '">' + x + (tk ? " — " + L("محجوز", "Booked") : "") + "</button>";
+      }).join("") + "</div>";
+    } else { sel = ""; t = ""; }
+    return "<label>" + L("اختر يوم المقابلة (خلال شهر من الآن)", "Pick the meeting day (within a month)") + "</label>" + grid + slots +
+      '<input type="hidden" name="date_from" id="f_date_from" value="' + sel + '"><input type="hidden" name="time_from" id="f_mtime" value="' + (t || "") + '">' +
+      (sel && t ? '<p class="ok">✔ ' + L("الموعد: ", "Appointment: ") + T(WD[parseDate(sel).getDay()]) + " " + sel + L(" الساعة ", " at ") + t + "</p>" : "");
+  }
+  function meetForm(u, e, v, c) {
+    return '<form class="box" data-f="req"><div class="fh"><b>🤝 ' + L("حجز مقابلة رئيس القسم", "Book a meeting with the Head of Department") + '</b><a href="' + link("my", { c: c }) + '">✕ ' + L("إغلاق", "Close") + "</a></div>" +
+      '<input type="hidden" name="kind" id="f_kind" value="meet"><input type="hidden" name="meet_with" value="head">' +
+      '<p class="msg">' + L("المقابلة مع: <b>رئيس القسم</b> — مقابلتان فقط في اليوم، من 8:00 حتى 11:30 صباحًا، أيام الأحد والإثنين والأربعاء والخميس، وأقرب موعد اليوم التالي.",
+        "Meeting with: <b>Head of Department</b> — only two meetings a day, 8:00–11:30 am, on Sunday, Monday, Wednesday and Thursday; the earliest date is tomorrow.") + "</p>" +
+      '<p class="sub" id="route-hint">' + routeTxt(u) + '</p><p class="sub" id="pro-hint" hidden>' + L("يُحال هذا الطلب إلى مسؤول المهنيين لاعتماده.", "This request goes to the Professionals Officer for approval.") + "</p>" +
+      '<div id="meet-pick">' + meetPicker(v.date_from || "", v.time_from || "") + "</div>" + errHtml(e, "date_from") + errHtml(e, "time_from") +
+      field("meet_reason", L("سبب المقابلة (إلزامي)", "Reason for the meeting (required)"), { type: "textarea", rows: "3", maxlength: "500" }, e, v.meet_reason) +
+      '<p class="note-l">' + L("📌 تنبيه: في حال طلب المقابلة لأسباب خاصة، اكتب في خانة السبب كلمة (خاص).", "📌 Note: if the meeting is for private reasons, just write (Private) in the reason box.") + "</p>" +
+      field("secret", L("الرقم السري لنظام جابر", "Jaber system secret number"), { type: "password", autocomplete: "off", required: "" }, e) +
+      '<p class="sub">' + L("في النسخة التجريبية اكتب أي رقم (مثلًا 1234) — لا تكتب رقمك الحقيقي.", "In the demo, type any number (e.g. 1234) — never your real one.") + "</p>" +
+      '<p><button class="p">' + L("حجز الموعد", "Book the appointment") + "</button></p></form>";
+  }
+  // رئيس القسم ومدير النظام: عرض الحجوزات وإغلاق أيام معيّنة
+  function viewMeetCal() {
+    var t = new Date(), days = [], B = load().meetBlocks || {};
+    for (var i = 0; i <= 45; i++) { var d = new Date(t.getFullYear(), t.getMonth(), t.getDate() + i); if (MEET_OFF.indexOf(d.getDay()) < 0) days.push(d); }
+    var rows = days.map(function (d) {
+      var s = ymd(d), bk = meetBooked(s).sort(function (a, b) { return a.time_from < b.time_from ? -1 : 1; }), bl = B[s];
+      return "<tr" + (bl ? ' class="blk"' : "") + "><td><b>" + T(WD[d.getDay()]) + "</b> " + s + "</td><td>" +
+        (bk.length ? bk.map(function (r) { return '<span class="mbk">' + esc(r.time_from) + " — " + esc(uname(r.user_id)) + ' <button type="button" class="lnk inl" data-act="open-req" data-id="' + r.id + '">' + esc(r.ref) + "</button></span>"; }).join("") : '<span class="muted">—</span>') +
+        "</td><td>" + (bl ? '<span class="offd">🔒 ' + L("مغلق", "Closed") + "</span>" : bk.length >= MEET_MAX ? '<span class="chip">' + L("مكتمل", "Full") + "</span>" : '<span class="ok">' + L("متاح", "Open") + " (" + (MEET_MAX - bk.length) + ")</span>") +
+        '</td><td><button type="button" class="pbtn' + (bl ? "" : " del") + '" data-act="mblock" data-d="' + s + '">' + (bl ? "🔓 " + L("فتح اليوم", "Open day") : "🔒 " + L("إغلاق اليوم", "Close day")) + "</button></td></tr>";
+    }).join("");
+    return "<h2>" + L("مواعيد مقابلات رئيس القسم", "Head of Department meetings") + '</h2><p class="sub">' +
+      L("الحجوزات خلال الأيام القادمة (الجمعة والسبت والثلاثاء لا مقابلات). أغلق أي يوم بحيث لا يستطيع أحد الحجز فيه، وافتحه متى شئت.",
+        "Bookings for the coming days (no meetings on Friday, Saturday or Tuesday). Close any day so nobody can book it, and reopen it whenever you like.") + "</p>" +
+      '<div class="tw"><table class="ltab mtab"><thead><tr><th>' + L("اليوم", "Day") + "</th><th>" + L("الحجوزات", "Bookings") + "</th><th>" + L("الحالة", "Status") + "</th><th></th></tr></thead><tbody>" + rows + "</tbody></table></div>";
+  }
+
+  /* ---------- أمر الزام: اعتماد طلبات موظفي زامه ثم تحويلها للإداري للتنفيذ ---------- */
+  function viewZam(q, u) {
+    var base = load().reqs.filter(function (r) { return !isPro(r) && inZam(r) && (u.role !== "z" || zamOf(r) === u.zam_cmd); });
+    var intro = '<p class="msg">' + (u.role === "z" ? L("طلبات موظفي ", "Requests from ") + T(ZAMS[u.zam_cmd]) + L(" — اعتمادك يُحيل الطلب إلى الإداري للتنفيذ.", " — your approval sends the request to the clerk for execution.")
+      : L("طلبات موظفي الزامات الثلاثة (اعتمادك يكون بالنيابة عن أمر الزام).", "Requests from all three shifts (you approve on behalf of the shift commander).")) + "</p>";
+    return listView("zam", u, q, base, "w", [
+      ["w", L("بانتظار اعتمادك", "Awaiting your approval"), function (r) { return stage(r) === "cmd"; }, true],
+      ["ok", L("معتمد", "Approved"), function (r) { return r.status === "a"; }, true],
+      ["r", L("مرفوض", "Rejected"), function (r) { return r.status === "r"; }, true],
+      ["all", L("الكل", "All"), ALL]
+    ], "zam", intro);
+  }
+  function doCmd(form, submitter) {
+    var r = reqById(+form.dataset.id), why = form.reason.value.trim(), act = submitter && submitter.value, now = new Date().toISOString(), who = me();
+    if (!r || stage(r) !== "cmd" || !canAct(who, r)) return render();
+    if (act === "r" && !why) { flash("err", L("يجب كتابة سبب الرفض", "A rejection reason is required")); return render(); }
+    if (act === "a") {
+      r.cmd_by = who.id; r.cmd_at = now; r.status = "a";
+      log("cmd_ok", r.id); flash("ok", L("تم اعتماد الطلب رقم الصادر " + r.ref + "، وأُحيل إلى الإداري للتنفيذ.", "Request " + r.ref + " approved and sent to the clerk for execution."));
+    } else {
+      r.status = "r"; r.reject_reason = why; r.decided_by = who.id; r.decided_at = now; r.dec_role = "cmd";
+      log("cmd_rej", r.id); flash("ok", L("تم رفض الطلب رقم الصادر " + r.ref, "Request " + r.ref + " rejected"));
+    }
+    save(); render();
+  }
+
+  /* ---------- إحصائية الإجازات: من أخذ إجازة ومن متى إلى متى ---------- */
+  var LV_KINDS = ["leave", "emer", "med", "ext", "pleave", "pexit"];
+  var LPER = { week: [7, ["أسبوع (آخر 7 أيام)", "Week (last 7 days)"]], month: [30, ["شهر (آخر 30 يومًا)", "Month (last 30 days)"]], "3m": [90, ["3 أشهر (آخر 90 يومًا)", "3 months (last 90 days)"]], next: [30, ["القادمة (الشهر القادم)", "Upcoming (next month)"]] };
+  function viewLeaves(q, u) {
+    var p = LPER[q.p] ? q.p : "month", N = LPER[p][0], now = new Date(), to = new Date(now.getFullYear(), now.getMonth(), now.getDate()), from = addDays(to, -(N - 1));
+    if (p === "next") { from = to; to = addDays(from, N - 1); }
+    var fs = ymd(from), ts = ymd(to), proOnly = u.role === "m";
+    var list = load().reqs.filter(function (r) {
+      if (LV_KINDS.indexOf(r.kind) < 0 || r.status === "r" || (proOnly && !isPro(r))) return false;
+      return r.date_from <= ts && (r.date_to || r.date_from) >= fs;
+    }).sort(function (a, b) { return a.date_from < b.date_from ? 1 : -1; });
+    var emps = {}, days = 0;
+    list.forEach(function (r) { emps[r.user_id] = 1; days += spanDays(r.date_from, r.date_to || r.date_from); });
+    var key = "leaves|" + p + "|" + fs, canOk = "ams".indexOf(u.role) >= 0;
+    if (statTemp && statTemp.key !== key) statTemp = null;
+    var ok = statTemp, title = proOnly ? L("إحصائية إجازات المهنيين", "Professionals Leave Statistics") : L("إحصائية إجازات الموظفين", "Employee Leave Statistics");
+    var rows = list.map(function (r, i) {
+      var eu = userById(r.user_id) || {}, st = pill(r, "my");
+      return "<tr><td>" + (i + 1) + "</td><td><b>" + esc(eu.full_name) + "</b><br><small>" + esc(eu.job_title) + "</small></td><td>" + esc(KR(r)) + "</td><td>" + esc(r.date_from) + "</td><td>" + esc(r.date_to || r.date_from) +
+        '</td><td><span class="chip">' + daysTxt(spanDays(r.date_from, r.date_to || r.date_from)) + '</span></td><td><span class="pill ' + st[0] + '">' + st[1] + '</span></td><td><button type="button" class="lnk inl" data-act="open-req" data-id="' + r.id + '">' + esc(r.ref) + "</button></td></tr>";
+    }).join("");
+    return statTabs("leaves") +
+      '<form class="flt noprint" data-f="filter" data-path="stats"><input type="hidden" name="v" value="leaves"><select name="p">' +
+      Object.keys(LPER).map(function (k) { return '<option value="' + k + '"' + (k === p ? " selected" : "") + ">" + T(LPER[k][1]) + "</option>"; }).join("") + "</select><button>" + L("عرض", "Show") + "</button></form>" +
+      approveBar(key, canOk, ok, L("اعتماد وطباعة إحصائية الإجازات", "Approve & print leave statistics")) +
+      '<div class="rep">' + letterhead(L("تاريخ الإصدار", "Issued on")) +
+      '<div class="rt"><h1>' + title + "</h1><p>" + T(LPER[p][1]) + "</p></div>" +
+      rinfo([[L("الفترة", "Period"), L("من ", "") + fs + L(" إلى ", " → ") + ts], [L("عدد الإجازات", "Leaves"), list.length], [L("عدد الموظفين", "Employees"), Object.keys(emps).length], [L("مجموع الأيام", "Total days"), daysTxt(days)]]) +
+      '<section class="spanel"><h3>' + ic("calendar") + L("الموظفون المجازون ومدة كل إجازة", "Who was on leave, and when") + '</h3><div class="tw"><table class="ltab"><thead><tr><th>#</th><th>' + L("الموظف", "Employee") + "</th><th>" +
+      L("نوع الإجازة", "Leave type") + "</th><th>" + L("من", "From") + "</th><th>" + L("إلى", "To") + "</th><th>" + L("المدة", "Length") + "</th><th>" + L("الحالة", "Status") + "</th><th>" + L("رقم الصادر", "Out no.") + "</th></tr></thead><tbody>" +
+      (rows || '<tr><td colspan="8">' + L("لا توجد إجازات في هذه الفترة.", "No leaves in this period.") + "</td></tr>") + "</tbody></table></div></section>" +
+      signBlock(ok, L("اعتماد إحصائية الإجازات", "Leave statistics approved")) + repFoot() + "</div>";
+  }
+
   function KR(r) { return r.kind === "ext" ? T(EXTN[r.ext_kind] || KINDS.ext) : K(r.kind); }
   function nextDay(s) { return ymd(addDays(parseDate(s), 1)); }
   function spanDays(a, b) { return Math.round((parseDate(b) - parseDate(a)) / 864e5) + 1; }
@@ -94,10 +237,10 @@
     return L("⚠️ تنبيه: قُدِّم هذا الطلب بعد مضيّ " + daysTxt(n) + " على تاريخه، وقد يتعرّض للرفض بسبب التأخر في تقديمه.",
       "⚠️ Notice: this request was submitted " + daysTxt(n) + " after its date and may be rejected due to late submission.");
   }
-  function lateForm(n, pro) {
-    return L("⚠️ تنبيه: مضى على تاريخ الطلب " + daysTxt(n) + ". يمكنك إرسال الطلب وسيصل إلى " + (pro ? "مسؤول المهنيين" : "الإداري") +
+  function lateForm(n, who) {
+    return L("⚠️ تنبيه: مضى على تاريخ الطلب " + daysTxt(n) + ". يمكنك إرسال الطلب وسيصل إلى " + who +
       " للاعتماد، إلا أنه قد يتعرّض للرفض بسبب التأخر في تقديمه.",
-      "⚠️ Notice: " + daysTxt(n) + " have passed since the request date. You may still submit it and it will reach " + (pro ? "the Professionals Officer" : "the administrative clerk") +
+      "⚠️ Notice: " + daysTxt(n) + " have passed since the request date. You may still submit it and it will reach " + who +
       " for approval; however, it may be rejected due to late submission.");
   }
   function lateBox(r) { var n = lateOf(r); return n ? '<p class="late">' + lateCard(n) + "</p>" : ""; }
@@ -114,10 +257,15 @@
     if (r.status === "r") return "rej";
     if (r.status === "a") return r.done_at ? "done" : "exec";
     if (isPro(r) && !r.pro_by) return "pro";
-    return "clerk";
+    if (!isPro(r) && inZam(r) && !r.cmd_by) return "cmd"; // موظف زام ← أمر الزام أولًا
+    return "clerk"; // الإداري يعتمد الدوام الصباحي فقط
   }
-  var STAGE_ROLES = { pro: "ms", clerk: "as", exec: "as" };
-  function canAct(u, r) { var s = STAGE_ROLES[stage(r)]; return !!(u && s && s.indexOf(u.role) >= 0); }
+  var STAGE_ROLES = { pro: "ms", cmd: "zs", clerk: "as", exec: "as" };
+  function canAct(u, r) {
+    var sg = stage(r), s = STAGE_ROLES[sg];
+    if (!(u && s && s.indexOf(u.role) >= 0)) return false;
+    return sg !== "cmd" || u.role !== "z" || u.zam_cmd === zamOf(r);
+  }
   function rejText(r) { return r.auto_rejected ? L("تجاوز الحد الشهري للاستئذانات (" + LIMIT + ")", "Monthly permission limit (" + LIMIT + ") exceeded") : r.reject_reason; }
 
   /* ---------- التخزين ---------- */
@@ -146,10 +294,14 @@
       [6, "emp2", "e", "سارة يوسف الرشيدي", "مهندسة إلكترونيات", ""],
       [7, "pro", "m", "سالم ناصر العجمي", "مسؤول المهنيين", ""],
       [8, "clerk2", "a", "مريم خالد العتيبي", "إداري", ""],
-      [9, "pemp", "e", "راشد حمد الديحاني", "مهني كهرباء", ""]
+      [9, "pemp", "e", "راشد حمد الديحاني", "مهني كهرباء", ""],
+      [10, "zam1", "z", "بدر فيصل العنزي", "أمر الزام الأول", "نقيب", "1"],
+      [11, "zam2", "z", "حمد ناصر المري", "أمر الزام الثاني", "نقيب", "2"],
+      [12, "zam3", "z", "يوسف خالد الصباح", "أمر الزام الثالث", "ملازم أول", "3"]
     ].map(function (x) {
       return { id: x[0], username: x[1], password: "123456", role: x[2], full_name: x[3], job_title: x[4], rank: x[5],
-               civil_id: "2900101000" + pad(x[0]), phone: "5000000" + x[0], duty: x[0] === 4 ? ymd(t) : "", pro: x[0] === 9 };
+               civil_id: "2900101000" + pad(x[0]), phone: "5" + ("000000" + x[0]).slice(-7), duty: x[0] === 4 ? ymd(t) : "", pro: x[0] === 9,
+               zam: x[0] === 6 ? "1" : "m", zam_cmd: x[6] || "", mil_no: x[0] === 9 ? "45127" : "", photo: "" };
     });
     function R(o) {
       return Object.assign({ date_to: "", depart_date: "", time_from: "", time_to: "", meet_with: "", meet_reason: "", perm_period: "", notes: "", med: "", secret: "",
@@ -176,7 +328,7 @@
       { id: 2, uid: 8, name: "", phone: "", mode: "cycle", days: [], on: 1, off: 1, start: d(1) },
       { id: 3, uid: 1, name: "", phone: "", mode: "week", days: [0, 1, 2, 3, 4], on: 1, off: 0, start: d(0) }
     ];
-    var D = { users: u, reqs: reqs, roster: roster, audit: [], statOk: {}, seq: { u: 10, r: 12, out: {}, d: 4 }, seeded: now };
+    var D = { users: u, reqs: reqs, roster: roster, audit: [], statOk: {}, seq: { u: 13, r: 12, out: {}, d: 4 }, meetBlocks: {}, seeded: now };
     reqs.slice().sort(function (a, b) { return a.created < b.created ? -1 : 1; }).forEach(function (r) { r.ref = nextRef(D, r.created); });
     // سجل عمليات تجريبي مبني على الطلبات (للتنبيهات وسجل العمليات)
     reqs.forEach(function (r) {
@@ -196,7 +348,8 @@
     if (!db || !db.users) { db = seed(); save(); }
     if (!db.statOk) db.statOk = {};
     if (!db.seq.out) db.seq.out = {};
-    db.users.forEach(function (u) { if (u.pro === undefined) u.pro = u.role === "e" && proTitle(u.job_title); });
+    db.users.forEach(function (u) { if (u.pro === undefined) u.pro = u.role === "e" && proTitle(u.job_title); if (!u.zam) u.zam = "m"; });
+    if (!db.meetBlocks) db.meetBlocks = {};
     if (!db.roster) { // ترقية: أنشئ زام الإداري من الإداريين الحاليين
       var t0 = today(), t1 = ymd(addDays(new Date(), 1));
       db.roster = db.users.filter(function (u) { return u.role === "a"; }).map(function (u, i) {
@@ -260,7 +413,9 @@
     ok: ["اعتماد الطلب", "Request approved"], ok_late: ["اعتماد طلب متأخر", "Late request approved"], rej: ["رفض الطلب", "Request rejected"],
     follow: ["طلب متابعة", "Follow-up requested"], done: ["تم عمل اللازم", "Completed"], print: ["طباعة الطلب", "Request printed"],
     reveal: ["عرض الرقم السري", "Secret number viewed"], remind: ["تذكير الإداري", "Clerk reminded"], stat: ["اعتماد الإحصائية", "Statistics approved"],
-    duty_add: ["إضافة إلى زام الإداري", "Added to duty roster"], duty_edit: ["تعديل زام الإداري", "Duty roster edited"], duty_del: ["حذف من زام الإداري", "Removed from duty roster"], user_edit: ["تعديل بيانات موظف", "Employee details edited"]
+    duty_add: ["إضافة إلى زام الإداري", "Added to duty roster"], duty_edit: ["تعديل زام الإداري", "Duty roster edited"], duty_del: ["حذف من زام الإداري", "Removed from duty roster"], user_edit: ["تعديل بيانات موظف", "Employee details edited"],
+    cmd_ok: ["اعتماد أمر الزام", "Shift commander approval"], cmd_rej: ["رفض أمر الزام", "Shift commander rejection"],
+    mblock: ["إغلاق يوم للمقابلات", "Meeting day closed"], munblock: ["فتح يوم للمقابلات", "Meeting day reopened"]
   };
   function log(act, rid, x) {
     var u = me();
@@ -284,13 +439,15 @@
   var ROUTES = {
     login: { anon: true, view: viewLogin },
     register: { anon: true, view: viewRegister },
-    home: { roles: "emhoas", view: viewHome },
-    my: { roles: "emhoas", view: viewMy },
+    home: { roles: "emhoasz", view: viewHome },
+    my: { roles: "emhoasz", view: viewMy },
     pro: { roles: "ms", view: viewPro },
     review: { roles: "hos", view: viewReview },
     queue: { roles: "as", view: viewQueue },
     stats: { roles: "mhoas", view: viewStats },
     users: { roles: "s", view: viewUsers },
+    zam: { roles: "zs", view: viewZam },
+    meetcal: { roles: "hs", view: viewMeetCal },
     audit: { roles: "hs", view: viewAudit },
     duty: { roles: "s", view: viewDuty }
   };
@@ -366,19 +523,20 @@
   function counts(u) {
     var R = load().reqs, n = function (f) { return R.filter(f).length; };
     var c = { clerk: n(function (r) { return stage(r) === "clerk"; }), exec: n(function (r) { return stage(r) === "exec"; }), pro: n(function (r) { return stage(r) === "pro"; }),
-              pending: n(function (r) { return r.status === "p"; }), mine: n(function (r) { return r.user_id === u.id && r.status === "p"; }) };
-    c.bell = { e: c.mine, m: c.pro, h: c.pending, o: c.pending, a: c.clerk + c.exec, s: c.clerk + c.exec + c.pro }[u.role] || 0;
-    c.bellHref = { e: "#/my", m: "#/pro?f=w", h: "#/review?f=p", o: "#/review?f=p", a: "#/queue?f=w", s: "#/queue?f=w" }[u.role];
+              pending: n(function (r) { return r.status === "p"; }), mine: n(function (r) { return r.user_id === u.id && r.status === "p"; }),
+              cmd: n(function (r) { return stage(r) === "cmd" && (u.role !== "z" || zamOf(r) === u.zam_cmd); }) };
+    c.bell = { e: c.mine, m: c.pro, h: c.pending, o: c.pending, a: c.clerk + c.exec, s: c.clerk + c.exec + c.pro + c.cmd, z: c.cmd }[u.role] || 0;
+    c.bellHref = { e: "#/my", m: "#/pro?f=w", h: "#/review?f=p", o: "#/review?f=p", a: "#/queue?f=w", s: "#/queue?f=w", z: "#/zam?f=w" }[u.role];
     return c;
   }
-  function mainHref(u) { return { e: "#/my", m: "#/pro", h: "#/review", o: "#/review", a: "#/queue?f=w", s: "#/queue?f=w" }[u.role]; }
+  function mainHref(u) { return { e: "#/my", m: "#/pro", h: "#/review", o: "#/review", a: "#/queue?f=w", s: "#/queue?f=w", z: "#/zam?f=w" }[u.role]; }
   function topbar(u, c) {
     return '<header class="top noprint"><button type="button" class="burger" data-act="menu" aria-label="' + L("القائمة", "Menu") + '">' + ic("menu") + "</button>" +
       '<a class="brand" href="#/home">' + logos() + '<span><b>' + T(ORG) + "</b><small>" + T(DEPT) + "</small></span></a>" +
       '<div class="tinfo"><span class="ti">' + ic("clock") + '<b id="clk">' + hm() + '</b></span><span class="ti">' + ic("calendar") + '<b id="dte">' + dateLong() + "</b></span>" +
       '<a class="bell" href="' + c.bellHref + '" title="' + L("بانتظار إجراء", "Awaiting action") + '">' + ic("bell") + (c.bell ? "<i>" + c.bell + "</i>" : "") + "</a>" +
       '<span class="who"><small>' + L("أهلًا وسهلًا", "Welcome") + "</small><b>" + esc(u.full_name) + "</b></span>" +
-      '<span class="ava" title="' + esc(roleName(u.role)) + '">' + ic("user") + "</span></div></header>";
+      avaHtml(u, roleOf(u)) + "</div></header>";
   }
   function sideNav(u, r, c) {
     var cur = r.path, f = r.q.f || "";
@@ -387,18 +545,20 @@
       return '<a href="' + href + '"' + (on ? ' class="on"' : "") + ">" + ic(icon) + "<span>" + label + "</span>" + (badge ? '<i class="bdg">' + badge + "</i>" : "") + "</a>";
     }
     function group(title, items) { var h = items.join(""); return h ? '<div class="sg"><h4>' + title + "</h4>" + h + "</div>" : ""; }
-    return '<div class="sh-in"><div class="side-who"><span class="ava">' + ic("user") + "</span><span><b>" + esc(u.full_name) + "</b><small>" + roleName(u.role) + "</small></span></div>" +
-      item("#/home", L("الرئيسية", "Home"), "home", "emhoas", 0, cur === "home") +
+    return '<div class="sh-in"><div class="side-who">' + avaHtml(u) + "<span><b>" + esc(u.full_name) + "</b><small>" + roleOf(u) + "</small></span></div>" +
+      item("#/home", L("الرئيسية", "Home"), "home", "emhoasz", 0, cur === "home") +
       group(L("إدارة الطلبات", "Requests"), [
-        item("#/my", L("طلباتي", "My requests"), "file", "emhoas", 0, cur === "my"),
+        item("#/my", L("طلباتي", "My requests"), "file", "emhoasz", 0, cur === "my"),
         item("#/review", L("متابعة الطلبات", "Requests overview"), "list", "hos", c.pending, cur === "review"),
         item("#/pro", L("اعتماد المهنيين", "Professionals approval"), "check", "ms", c.pro, cur === "pro"),
+        item("#/zam?f=w", L("اعتماد الزام", "Shift approvals"), "check", "zs", c.cmd, cur === "zam"),
         item("#/queue?f=w", L("اعتماد الطلبات", "Approve requests"), "check", "as", c.clerk, cur === "queue" && (f === "w" || !f)),
         item("#/queue?f=n", L("تنفيذ الطلبات", "Execute requests"), "sliders", "as", c.exec, cur === "queue" && !!f && f !== "w")
       ]) +
       group(L("إدارة الموظفين", "Staff"), [
         item("#/users", L("الموظفون والصلاحيات", "Staff & permissions"), "users", "s", 0, cur === "users"),
-        item("#/duty", L("زام الإداري", "Duty roster"), "calendar", "s", 0, cur === "duty")
+        item("#/duty", L("زام الإداري", "Duty roster"), "calendar", "s", 0, cur === "duty"),
+        item("#/meetcal", L("مواعيد المقابلات", "Meeting calendar"), "calendar", "hs", 0, cur === "meetcal")
       ]) +
       group(L("التقارير والإدارة", "Reports & admin"), [
         item("#/stats", L("الإحصائيات والتقارير", "Statistics & reports"), "chart", "mhoas", 0, cur === "stats"),
@@ -421,7 +581,7 @@
       '</span><span class="by">' + CREDIT.replace("ABDULRAZZAQ ALHAJRI", "<b>ABDULRAZZAQ ALHAJRI</b>") + "</span></footer>";
   }
   var PT = { my: ["طلباتي", "My requests"], review: ["متابعة الطلبات", "Requests overview"], pro: ["اعتماد المهنيين", "Professionals approval"],
-             queue: ["اعتماد وتنفيذ الطلبات", "Approve & execute requests"], stats: ["الإحصائيات والتقارير", "Statistics & reports"] };
+             queue: ["اعتماد وتنفيذ الطلبات", "Approve & execute requests"], zam: ["اعتماد طلبات الزام", "Shift requests approval"], stats: ["الإحصائيات والتقارير", "Statistics & reports"] };
   function layout(u, r, content) {
     var c = counts(u);
     return '<div class="lay">' + topbar(u, c) + '<div class="body"><aside class="side noprint" id="side">' + sideNav(u, r, c) + "</aside>" +
@@ -439,19 +599,21 @@
   /* ---------- الرئيسية: لوحة المعلومات ---------- */
   function scopeFor(u) {
     var R = load().reqs;
-    return u.role === "e" ? R.filter(function (r) { return r.user_id === u.id; }) : u.role === "m" ? R.filter(function (r) { return isPro(r) || r.user_id === u.id; }) : R;
+    return u.role === "e" ? R.filter(function (r) { return r.user_id === u.id; }) : u.role === "m" ? R.filter(function (r) { return isPro(r) || r.user_id === u.id; })
+      : u.role === "z" ? R.filter(function (r) { return r.user_id === u.id || (!isPro(r) && zamOf(r) === u.zam_cmd); }) : R;
   }
   function hrefFor(u, k) {
     var M = {
       e: { p: "#/my", a: "#/my", x: "#/my", r: "#/my", all: "#/my" },
       m: { p: "#/pro?f=w", a: "#/pro?f=ok", x: "#/pro?f=ok", r: "#/pro?f=r", all: "#/pro?f=all" },
       h: { p: "#/review?f=p", a: "#/review?f=a", x: "#/review?f=a", r: "#/review?f=r", all: "#/review?f=all" },
-      a: { p: "#/queue?f=w", a: "#/queue?f=all", x: "#/queue?f=n", r: "#/queue?f=r", all: "#/queue?f=all" }
+      a: { p: "#/queue?f=w", a: "#/queue?f=all", x: "#/queue?f=n", r: "#/queue?f=r", all: "#/queue?f=all" },
+      z: { p: "#/zam?f=w", a: "#/zam?f=ok", x: "#/zam?f=ok", r: "#/zam?f=r", all: "#/zam?f=all" }
     };
     return (M[u.role] || M[u.role === "o" ? "h" : "a"])[k];
   }
   function dotOf(a) {
-    return /^(ok|ok_late|pro_ok|done|stat)$/.test(a.act) ? "g" : /^(rej|pro_rej|auto)$/.test(a.act) ? "r" : /^(submit|late)$/.test(a.act) ? "b" : "o";
+    return /^(ok|ok_late|pro_ok|cmd_ok|done|stat)$/.test(a.act) ? "g" : /^(rej|pro_rej|cmd_rej|auto)$/.test(a.act) ? "r" : /^(submit|late)$/.test(a.act) ? "b" : "o";
   }
   function viewHome(q, u) {
     var S = scopeFor(u), ids = {};
@@ -466,7 +628,9 @@
     var latest = S.slice().sort(byCreated).slice(0, 5);
     var alerts = load().audit.filter(function (a) { return u.role === "e" || u.role === "m" ? a.rid && ids[a.rid] : true; }).slice(0, 5);
     var QK = [
-      ["#/my?new=perm", "plus", L("طلب جديد", "New request"), L("استئذان، إجازة، طبية…", "Permission, leave, medical…"), "emhoas"],
+      ["#/my", "plus", L("طلب جديد", "New request"), L("إجازة، مقابلة، طلبات أخرى…", "Leave, meeting, other requests…"), "emhoasz"],
+      ["#/zam?f=w", "check", L("اعتماد الزام", "Shift approvals"), L("طلبات موظفي زامك", "Your shift's requests"), "z"],
+      ["#/meetcal", "calendar", L("مواعيد المقابلات", "Meeting calendar"), L("الحجوزات وإغلاق الأيام", "Bookings and closed days"), "hs"],
       ["#/queue?f=w", "check", L("اعتماد الطلبات", "Approve requests"), L("بانتظار اعتمادك", "Awaiting your approval"), "as"],
       ["#/pro?f=w", "check", L("اعتماد المهنيين", "Professionals approval"), L("طلبات المهنيين", "Professionals requests"), "m"],
       ["#/review", "list", L("متابعة الطلبات", "Requests overview"), L("للاطلاع والمتابعة", "View and follow up"), "ho"],
@@ -474,10 +638,10 @@
       ["#/stats", "chart", L("لوحة الإحصائيات", "Statistics"), L("متابعة شاملة", "Full overview"), "mhoas"],
       ["#/duty", "calendar", L("زام الإداري", "Duty roster"), L("المداومون وآلية العمل", "Who is on duty"), "s"],
       ["#/audit", "history", L("سجل العمليات", "Audit log"), L("كل الكتب والإجراءات", "Every document and action"), "hs"],
-      ["#/my", "file", L("طلباتي", "My requests"), L("حالة طلباتك وأختامها", "Your requests and stamps"), "emhoas"]
-    ].filter(function (x) { return x[4].indexOf(u.role) >= 0; }).slice(0, 5);
-    return '<section class="hero-b"><div><span class="hb-dept">' + T(DEPT) + "</span><h1>" + L("مرحبًا بك في النظام الإلكتروني", "Welcome to the electronic system") + "</h1><h2>" +
-      L("للإدارة العامة لخفر السواحل", "of the General Administration of Coast Guard") + '</h2><p class="slogan">' + T(SLOGAN) + "</p><p>" + esc(u.full_name) + " — " + roleName(u.role) + "</p></div></section>" +
+      ["#/my", "file", L("طلباتي", "My requests"), L("حالة طلباتك وأختامها", "Your requests and stamps"), "emhoasz"]
+    ].filter(function (x) { return x[4].indexOf(u.role) >= 0 && !(u.pro && x[0] === "#/my?new=ext"); }).slice(0, 5);
+    return '<section class="hero-b"><div><span class="hb-org">' + T(ORG) + '</span><span class="hb-dept">' + T(DEPT) + "</span><h1>" + L("مرحبًا بك في النظام الإلكتروني", "Welcome to the electronic system") +
+      '</h1><p class="slogan">' + T(SLOGAN) + "</p><p>" + esc(u.full_name) + " — " + roleOf(u) + "</p></div></section>" +
       '<div class="kpis">' + K4.map(function (k) {
         return '<a class="kpi ' + k[0] + '" href="' + k[4] + '"><span class="kic">' + ic(k[1]) + "</span><span><b>" + k[2] + "</b><small>" + k[3] + "</small></span></a>";
       }).join("") + "</div>" +
@@ -558,9 +722,10 @@
   function stamps(r) {
     var s = "", proLbl = r.pro_proxy ? L("عن مسؤول المهنيين", "for Professionals Officer") : L("مسؤول المهنيين", "Professionals Officer");
     if (r.pro_by) s += stamp(r.pro_by, L("اعتماد ", "Approved — ") + proLbl, r.pro_at);
+    if (r.cmd_by) s += stamp(r.cmd_by, L("اعتماد ", "Approved — ") + roleOf(userById(r.cmd_by)), r.cmd_at);
     if (r.decided_by) {
       var rej = r.status === "r", role = r.dec_role || (rej && isPro(r) && !r.pro_by ? "pro" : "");
-      var lbl = rej ? (role === "pro" ? L("رفض ", "Rejected — ") + proLbl : L("مرفوض", "Rejected"))
+      var lbl = rej ? (role === "pro" ? L("رفض ", "Rejected — ") + proLbl : role === "cmd" ? L("رفض ", "Rejected — ") + roleOf(userById(r.decided_by)) : L("مرفوض", "Rejected"))
         : role === "chief" || (role !== "pro" && lateOf(r)) ? L("اعتماد (طلب متأخر)", "Approved (late request)") : L("اعتماد", "Approved");
       s += stamp(r.decided_by, lbl, r.decided_at, rej ? "red" : "");
     }
@@ -590,17 +755,18 @@
 
   /* ---------- تسجيل الدخول ---------- */
   var loginState = { errs: null, val: {} };
-  var DEMO = ["admin", "head", "officer", "pro", "clerk", "clerk2", "emp", "emp2", "pemp"];
+  var DEMO = ["admin", "head", "officer", "pro", "clerk", "zam1", "emp", "emp2", "pemp"];
   function viewLogin() {
     var s = loginState; loginState = { errs: null, val: {} };
     var demo = DEMO.map(function (n) { return load().users.filter(function (u) { return u.username === n && u.password === "123456"; })[0]; }).filter(Boolean);
     return '<div class="auth">' + authHead("user", L("تسجيل الدخول", "Sign in"), L("أدخل بيانات حسابك للمتابعة", "Enter your account details to continue")) +
       '<form data-f="login">' + (s.errs ? '<p class="err">' + esc(s.errs) + "</p>" : "") +
-      field("username", L("اسم المستخدم", "Username"), { autocomplete: "username", required: "" }, null, s.val.username) +
+      field("username", L("اسم المستخدم (الرقم المدني)", "Username (Civil ID)"), { autocomplete: "username", required: "", dir: "auto" }, null, s.val.username) +
+      '<p class="note-u">📌 ' + L("اسم المستخدم هو <b>رقمك المدني</b> (12 رقمًا).", "Your username is your <b>Civil ID</b> (12 digits).") + "</p>" +
       field("password", L("كلمة المرور", "Password"), { type: "password", autocomplete: "current-password", required: "" }) +
       '<button class="p wide">' + L("دخول", "Sign in") + '</button><a class="btn-out" href="#/register">' + L("موظف جديد؟ سجّل حسابك", "New employee? Create an account") + "</a></form>" +
       (demo.length ? '<div class="demo-box"><p>' + L("حسابات تجريبية (كلمة المرور <b>123456</b>) — اضغط للدخول مباشرة:", "Demo accounts (password <b>123456</b>) — tap to sign in:") + '</p><div class="demo-users">' + demo.map(function (u) {
-        return '<button type="button" data-act="quick" data-u="' + esc(u.username) + '">' + esc(u.username) + "<small>" + roleName(u.role) + "</small></button>";
+        return '<button type="button" data-act="quick" data-u="' + esc(u.username) + '">' + esc(u.username) + "<small>" + roleOf(u) + "</small></button>";
       }).join("") + "</div></div>" : "") +
       '<p class="note">' + L("نسخة تجريبية — أي بيانات أو طلبات تُدخلها هنا تُحفظ في هذا المتصفح فقط.", "Demo version — anything you enter here is saved in this browser only.") +
       "</p></div>";
@@ -613,47 +779,60 @@
     return '<div class="lay auth-lay"><header class="top"><a class="brand" href="#/login">' + logos() + '<span><b>' + T(ORG) + "</b><small>" + T(DEPT) + "</small></span></a>" +
       '<div class="tinfo"><span class="ti">' + ic("clock") + '<b id="clk">' + hm() + '</b></span><span class="ti">' + ic("calendar") + '<b id="dte">' + dateLong() + "</b></span>" +
       '<span><button type="button" class="tlang" data-act="lang">' + ic("globe") + "<span>" + L("English", "عربي") + "</span></button></span></div></header>" +
-      '<div class="auth-wrap"><section class="auth-hero"><div><span class="ah-dept">' + T(DEPT) + "</span>" + logos("ah-logos") +
-      "<h1>" + L("مرحبًا بك في النظام الإلكتروني", "Welcome to the electronic system") + "</h1><h2>" + L("للإدارة العامة لخفر السواحل", "of the General Administration of Coast Guard") + "</h2>" +
+      '<div class="auth-wrap"><section class="auth-hero"><div><span class="ah-org">' + T(ORG) + '</span><span class="ah-dept">' + T(DEPT) + "</span>" + logos("ah-logos") +
+      "<h1>" + L("مرحبًا بك في النظام الإلكتروني", "Welcome to the electronic system") + "</h1>" +
       '<p class="slogan">' + T(SLOGAN) + "</p></div></section>" +
       '<main class="auth-main">' + content + "</main></div>" + footer() + "</div>";
   }
   function doLogin(d) {
-    var u = load().users.filter(function (x) { return x.username.toLowerCase() === (d.username || "").toLowerCase(); })[0];
+    var nm = (d.username || "").toLowerCase(), cid = enDigits(d.username || "");
+    var u = load().users.filter(function (x) { return x.username.toLowerCase() === nm || (cid && x.civil_id === cid); })[0];
     if (!u || u.password !== d.password) { loginState = { errs: L("اسم المستخدم أو كلمة المرور غير صحيحة", "Incorrect username or password"), val: d }; return render(); }
     setUid(u.id); go(HOME[u.role]);
   }
 
-  /* ---------- تسجيل موظف ---------- */
+  /* ---------- تسجيل موظف: اسم المستخدم = الرقم المدني، صورة شخصية، رقم عسكري للمهنيين، نظام العمل ---------- */
   var regState = { errs: {}, val: {} };
   function viewRegister() {
     var s = regState; regState = { errs: {}, val: {} };
     return '<div class="auth">' + authHead("users", L("تسجيل موظف جديد", "New employee registration"), L("أنشئ حسابك لتقديم الطلبات إلكترونيًا", "Create your account to submit requests online")) + '<form data-f="register">' +
-      field("username", L("اسم المستخدم", "Username"), { required: "" }, s.errs, s.val.username) +
+      '<p class="note-u">📌 ' + L("انتبه: اسم المستخدم للدخول هو <b>رقمك المدني</b> (12 رقمًا).", "Note: your username for signing in is your <b>Civil ID</b> (12 digits).") + "</p>" +
       field("full_name", L("الاسم الثلاثي", "Full name (three parts)"), { required: "" }, s.errs, s.val.full_name) +
       field("job_title", L("المسمى الوظيفي", "Job title"), { required: "" }, s.errs, s.val.job_title) +
-      field("civil_id", L("الرقم المدني", "Civil ID"), { required: "", inputmode: "numeric", maxlength: "12" }, s.errs, s.val.civil_id) +
+      field("civil_id", L("الرقم المدني (هو اسم المستخدم)", "Civil ID (this is your username)"), { required: "", inputmode: "numeric", maxlength: "12" }, s.errs, s.val.civil_id) +
+      field("mil_no", L("الرقم العسكري (إلزامي للمهنيين)", "Military number (required for professionals)"), { inputmode: "numeric", maxlength: "12" }, s.errs, s.val.mil_no) +
       field("phone", L("رقم الهاتف", "Phone number"), { required: "", inputmode: "numeric", maxlength: "8" }, s.errs, s.val.phone) +
+      select("zam", L("نظام العمل", "Work system"), opts(ZAMS), s.errs, s.val.zam, true) +
+      field("photo", L("الصورة الشخصية", "Profile photo"), { type: "file", accept: "image/*", required: "" }, s.errs) +
       field("password1", L("كلمة المرور", "Password"), { type: "password", required: "", autocomplete: "new-password" }, s.errs) +
       field("password2", L("تأكيد كلمة المرور", "Confirm password"), { type: "password", required: "", autocomplete: "new-password" }, s.errs) +
-      '<button class="p wide">' + L("إنشاء الحساب", "Create account") + '</button><a class="btn-out" href="#/login">' + L("لديك حساب؟ سجّل دخولك", "Have an account? Sign in") + '</a></form></div>';
+      '<button class="p wide">' + L("إنشاء الحساب", "Create account") + '</button><a class="btn-out" href="#/login">' + L("لديك حساب؟ سجّل دخولك", "Have an account? Sign in") + "</a></form></div>";
   }
-  function doRegister(d) {
-    var e = {}, D = load();
-    if (!/^[\w.@+-]{1,150}$/.test(d.username || "")) e.username = L("اسم مستخدم غير صالح (حروف إنجليزية وأرقام فقط)", "Invalid username (English letters and digits only)");
-    else if (D.users.some(function (u) { return u.username.toLowerCase() === d.username.toLowerCase(); })) e.username = L("اسم المستخدم مستخدم من قبل", "Username already taken");
+  function doRegister(form) {
+    var d = formData(form), e = {}, D = load(), file = form.photo && form.photo.files[0];
     var fn = (d.full_name || "").split(/\s+/).filter(Boolean);
     if (fn.length < 3) e.full_name = L("اكتب الاسم الثلاثي كاملًا", "Enter your full three-part name");
     if (!d.job_title) e.job_title = req();
-    var cid = enDigits(d.civil_id || ""), ph = enDigits(d.phone || "");
+    var cid = enDigits(d.civil_id || ""), ph = enDigits(d.phone || ""), mil = enDigits(d.mil_no || ""), isProf = proTitle(d.job_title);
     if (!/^\d{12}$/.test(cid)) e.civil_id = L("الرقم المدني يجب أن يكون 12 رقمًا", "Civil ID must be 12 digits");
+    else if (D.users.some(function (u) { return u.civil_id === cid || u.username === cid; })) e.civil_id = L("هذا الرقم المدني مسجّل من قبل", "This Civil ID is already registered");
+    if (isProf && !mil) e.mil_no = L("الرقم العسكري إلزامي للمهنيين", "Military number is required for professionals");
+    else if (mil && !/^\d{3,12}$/.test(mil)) e.mil_no = L("الرقم العسكري أرقام فقط", "Military number must be digits");
     if (!/^\d{8}$/.test(ph)) e.phone = L("رقم الهاتف يجب أن يكون 8 أرقام", "Phone number must be 8 digits");
+    if (!ZAMS[d.zam]) e.zam = L("اختر نظام العمل", "Choose your work system");
+    if (!file) e.photo = L("أضف صورتك الشخصية", "Add your profile photo");
+    else if (!/^image\//.test(file.type)) e.photo = L("يجب أن يكون الملف صورة", "The file must be an image");
     if ((d.password1 || "").length < 6) e.password1 = L("كلمة المرور 6 أحرف على الأقل", "Password must be at least 6 characters");
     else if (d.password1 !== d.password2) e.password2 = L("كلمتا المرور غير متطابقتين", "Passwords do not match");
     if (Object.keys(e).length) { regState = { errs: e, val: d }; return render(); }
-    var isProf = proTitle(d.job_title); // مسماه مهني ← تلقائيًا تابع لمسؤول المهنيين
-    D.users.push({ id: D.seq.u++, username: d.username, password: d.password1, role: "e", full_name: fn.join(" "), job_title: d.job_title, rank: "", civil_id: cid, phone: ph, duty: "", pro: isProf });
-    save(); flash("ok", L("تم إنشاء الحساب، سجّل دخولك", "Account created — please sign in") + (isProf ? L(" — تم تسجيلك ضمن المهنيين (تابع لمسؤول المهنيين).", " — you were registered as a professional (under the Professionals Officer).") : "")); go("login");
+    shrink(file, 320).then(function (img) {
+      D.users.push({ id: D.seq.u++, username: cid, password: d.password1, role: "e", full_name: fn.join(" "), job_title: d.job_title, rank: "", civil_id: cid, phone: ph, duty: "",
+        pro: isProf, mil_no: mil, zam: d.zam, zam_cmd: "", photo: img });
+      save();
+      flash("ok", L("تم إنشاء الحساب — اسم المستخدم: " + cid + " (رقمك المدني)", "Account created — username: " + cid + " (your Civil ID)") +
+        (isProf ? L(" — تم تسجيلك ضمن المهنيين (تابع لمسؤول المهنيين).", " — registered as a professional (under the Professionals Officer).") : ""));
+      go("login");
+    }, function () { regState = { errs: { photo: L("تعذّرت قراءة الصورة", "Could not read the image") }, val: d }; render(); });
   }
 
   /* ---------- طلباتي ---------- */
@@ -669,7 +848,7 @@
     leave: ["date_from", "date_to"],
     emer: ["date_from", "date_to"],
     med: ["date_from", "date_to", "medical_image"],
-    meet: ["date_from", "time_from", "time_to", "meet_with", "meet_reason"],
+    meet: ["time_from", "meet_with", "meet_reason"],
     pleave: ["date_from", "date_to"],
     pexit: ["depart_date", "date_from", "date_to"],
     ext: ["date_from", "date_to"]
@@ -685,22 +864,23 @@
     var cnt = function (st) { return all.filter(function (r) { return r.status === st; }).length; };
     var head = hello(u, [[n + " / " + LIMIT, L("استئذانات هذا الشهر", "Permissions this month")], [cnt("p"), L("قيد الاعتماد", "Pending")], [cnt("a"), L("معتمد", "Approved")]]) +
       "<h2>" + L("طلب جديد", "New request") + '</h2><p class="sub">' + L("اختر القسم المطلوب:", "Choose a section:") + "</p>" +
-      '<div class="cats">' + Object.keys(CATS).filter(function (k) { return k !== "pro" || u.pro || "ms".indexOf(u.role) >= 0; }).map(function (k) {
+      '<div class="cats">' + catsFor(u).map(function (k) {
         return '<a href="' + link("my", { "new": k, c: c }) + '"' + (k === nw ? ' class="on"' : "") + "><i>" + CATS[k].icon + "</i><b>" + T(CATS[k].one) + "</b><small>" + T(CATS[k].d) + "</small></a>";
       }).join("") + "</div>";
     var list = "<h2>" + L("طلباتي", "My requests") + "</h2>" + catBar("my", { c: c }, all, items.length) +
       (items.length ? items.map(myCard).join("") : "<p>" + L("لا توجد طلبات في هذا القسم.", "No requests in this section.") + "</p>");
-    if (nw === "pro" && !u.pro && "ms".indexOf(u.role) < 0) nw = "";
+    if (nw && catsFor(u).indexOf(nw) < 0) nw = "";
     if (!nw) return head + list;
     if (nw === "ext") return head + extForm(u, e, v, c) + list;
-    var C = CATS[nw], kind = v.kind && catOf(v.kind) === nw ? v.kind : C.kinds[0], sub = {};
-    C.kinds.forEach(function (k) { sub[k] = K(k); });
+    if (nw === "meet") return head + meetForm(u, e, v, c) + list;
+    var C = CATS[nw], ks = C.kinds.filter(function (k) { return !(u.pro && PRO_BLOCK.indexOf(k) >= 0); }), kind = v.kind && ks.indexOf(v.kind) >= 0 ? v.kind : ks[0], sub = {};
+    ks.forEach(function (k) { sub[k] = K(k); });
     return head +
       '<form class="box" data-f="req"><div class="fh"><b>' + C.icon + " " + L("طلب ", "Request: ") + T(C.one) + '</b><a href="' + link("my", { c: c }) + '">✕ ' + L("إغلاق", "Close") + "</a></div>" +
-      (C.kinds.length > 1 ? select("kind", L("النوع", "Type"), sub, e, kind) : '<input type="hidden" name="kind" id="f_kind" value="' + kind + '">') +
+      (ks.length > 1 ? select("kind", L("النوع", "Type"), sub, e, kind) : '<input type="hidden" name="kind" id="f_kind" value="' + kind + '">') +
       (nw === "perm" ? '<p class="msg">' + L("استئذاناتك هذا الشهر: <b>" + n + " من " + LIMIT + "</b> — مدة الاستئذان <b>3 ساعات بالضبط</b>، وما زاد على الحد يرفضه النظام تلقائيًا.",
         "Your permissions this month: <b>" + n + " of " + LIMIT + "</b> — a permission is <b>exactly 3 hours</b>; anything over the limit is rejected automatically.") + "</p>" : "") +
-      '<p class="sub" id="route-hint">' + L("يعتمد الإداريُّ هذا الطلب.", "The administrative clerk approves this request.") + "</p>" +
+      '<p class="sub" id="route-hint">' + routeTxt(u) + "</p>" +
       '<p class="sub" id="pro-hint" hidden>' + L("يُحال هذا الطلب إلى مسؤول المهنيين لاعتماده.", "This request goes to the Professionals Officer for approval.") + "</p>" +
       field("depart_date", L("تاريخ المغادرة", "Departure date"), { type: "date" }, e, v.depart_date) +
       '<div class="row">' + field("date_from", L("التاريخ / من تاريخ", "Date / from"), { type: "date", required: "" }, e, v.date_from) + field("date_to", L("إلى تاريخ", "To date"), { type: "date" }, e, v.date_to) + "</div>" +
@@ -742,7 +922,7 @@
       '<div class="row">' + field("date_from", L("يبدأ التمديد من (تلقائيًا)", "Extension starts (automatic)"), { type: "date", readonly: "" }, e, from) +
       field("date_to", L("تمديد إلى تاريخ", "Extend until"), { type: "date", required: "", min: from }, e, v.date_to) + "</div>" +
       '<p class="ok" id="ext-days"></p>' +
-      '<p class="sub" id="route-hint">' + L("يعتمد الإداريُّ هذا الطلب.", "The administrative clerk approves this request.") + "</p>" +
+      '<p class="sub" id="route-hint">' + routeTxt(u) + "</p>" +
       '<p class="sub" id="pro-hint" hidden>' + L("يُحال هذا الطلب إلى مسؤول المهنيين لاعتماده.", "This request goes to the Professionals Officer for approval.") + "</p>" +
       '<p class="late" id="late-hint" hidden></p>' +
       '<p class="note-l" id="leave-hint">' + leaveNote() + "</p>" +
@@ -770,6 +950,13 @@
     return '<p class="ext">⏩ ' + L("تمديد للإجازة رقم الصادر ", "Extends request no. ") +
       (b ? '<button type="button" class="lnk inl" data-act="open-req" data-id="' + b.id + '">' + esc(b.ref) + "</button> (" + esc(KR(b)) + L(" من ", " from ") + esc(b.date_from) + L(" إلى ", " to ") + esc(b.date_to || b.date_from) + ")" : "—") +
       (n ? " — " + L("مدة التمديد: ", "extension: ") + daysTxt(n) : "") + "</p>";
+  }
+  // الأقسام المتاحة: المهني بدون استئذان وإجازة عادية وطبية وتمديد، وخانة المهنيين للمهني ومسؤوله ومدير النظام
+  function catsFor(u) {
+    return Object.keys(CATS).filter(function (k) {
+      if (k === "pro") return u.pro || "ms".indexOf(u.role) >= 0;
+      return !(u.pro && (k === "perm" || k === "med" || k === "ext"));
+    });
   }
   function refLine(r) {
     return '<p class="ref">' + L("رقم الصادر: ", "Outgoing no.: ") + "<b>" + esc(r.ref) + "</b> — " + L("تاريخ التقديم: ", "Submitted: ") + ymdhm(r.created) + "</p>";
@@ -823,7 +1010,7 @@
   function dates(r) {
     return (r.depart_date ? L("تاريخ المغادرة: ", "Departure: ") + esc(r.depart_date) + " — " : "") +
       (r.kind === "pexit" ? L("تاريخ الإجازة: ", "Leave: ") : "") + esc(r.date_from) + (r.date_to ? L(" إلى ", " to ") + esc(r.date_to) : "") +
-      (r.time_from ? L(" — من ", " — from ") + esc(r.time_from) + (r.time_to ? L(" إلى ", " to ") + esc(r.time_to) : "") : "") +
+      (r.time_from ? (r.time_to ? L(" — من ", " — from ") + esc(r.time_from) + L(" إلى ", " to ") + esc(r.time_to) : L(" — الساعة ", " — at ") + esc(r.time_from)) : "") +
       (r.meet_with ? L(" — المقابلة مع: ", " — Meeting with: ") + esc(meetName(r.meet_with)) : "");
   }
   function toggleKind() {
@@ -843,7 +1030,7 @@
     var k = document.getElementById("f_kind"), df = document.getElementById("f_date_from"), lh = document.getElementById("late-hint");
     if (!k || !df || !lh) return;
     var n = lateBy(k.value, df.value);
-    lh.hidden = !n; lh.textContent = n ? lateForm(n, !!(me() || {}).pro || (k.value === "ext" ? extPro() : PRO_KINDS.indexOf(k.value) >= 0)) : "";
+    lh.hidden = !n; lh.textContent = n ? lateForm(n, approverName(me(), !!(me() || {}).pro || (k.value === "ext" ? extPro() : PRO_KINDS.indexOf(k.value) >= 0))) : "";
   }
   function syncPermTime() {
     var k = document.getElementById("f_kind"), tf = document.getElementById("f_time_from"), tt = document.getElementById("f_time_to");
@@ -861,7 +1048,7 @@
       else d.date_from = nextDay(base.date_to || base.date_from); // بداية التمديد = اليوم التالي لنهاية الإجازة
       if (!d.date_to) e.date_to = L("اختر تاريخ نهاية التمديد", "Choose the extension end date");
     }
-    if (!d.date_from) e.date_from = req();
+    if (!d.date_from && d.kind !== "meet") e.date_from = req();
     if (!d.secret) e.secret = req();
     if (d.kind === "perm") {
       if (!d.perm_period) e.perm_period = L("اختر: بداية الدوام أو أثناء الدوام أو نهاية الدوام", "Choose start, during or end of shift");
@@ -869,8 +1056,12 @@
       else if (toMin(d.time_from) + PERM_MIN >= 1440) e.time_from = L("الاستئذان 3 ساعات ويجب أن ينتهي في اليوم نفسه", "A permission is 3 hours and must end the same day");
       else d.time_to = fromMin(toMin(d.time_from) + PERM_MIN); // 3 ساعات بالضبط، لا أكثر ولا أقل
     }
+    if (u.pro && PRO_BLOCK.indexOf(d.kind) >= 0) e.kind = L("هذا النوع غير متاح للمهنيين", "This request type is not available to professionals");
     if (d.kind === "meet") {
-      if (!MEET[d.meet_with]) e.meet_with = L("اختر المسؤول المطلوب مقابلته", "Choose who you want to meet");
+      d.meet_with = "head"; d.time_to = "";
+      if (!d.date_from || meetDay(parseDate(d.date_from)) !== "open") e.date_from = L("اختر يومًا متاحًا من التقويم", "Pick an available day from the calendar");
+      else if (MEET_SLOTS.indexOf(d.time_from) < 0) e.time_from = L("اختر وقت المقابلة", "Pick a time for the meeting");
+      else if (meetBooked(d.date_from).some(function (r) { return r.time_from === d.time_from; })) e.time_from = L("هذا الوقت محجوز، اختر وقتًا آخر", "That time is already booked — pick another");
       if (!d.meet_reason) e.meet_reason = L("اكتب سبب المقابلة", "Write the reason for the meeting");
     }
     if (d.kind === "pexit" && !d.depart_date) e.depart_date = L("اكتب تاريخ المغادرة", "Enter the departure date");
@@ -899,8 +1090,9 @@
       var lt = lateOf(r);
       log(lt ? "late" : "submit", r.id, lt || "");
       if (save()) {
-        var to = isPro(r) ? L("مسؤول المهنيين", "the Professionals Officer") : L("الإداري", "the administrative clerk");
-        var okm = L("أُرسل الطلب برقم الصادر " + r.ref + "، وهو الآن لدى " + to + " للاعتماد.", "Request sent — outgoing no. " + r.ref + ". It is now with " + to + " for approval.");
+        var to = approverName(u, isPro(r));
+        var okm = (r.kind === "meet" ? L("تم حجز موعد المقابلة يوم " + T(WD[parseDate(r.date_from).getDay()]) + " " + r.date_from + " الساعة " + r.time_from + " — ", "Meeting booked for " + r.date_from + " at " + r.time_from + " — ") : "") +
+          L("أُرسل الطلب برقم الصادر " + r.ref + "، وهو الآن لدى " + to + " للاعتماد.", "Request sent — outgoing no. " + r.ref + ". It is now with " + to + " for approval.");
         if (lt) flash("warn", okm + " " + lateCard(lt)); else flash("ok", okm);
         return nav(link("my", { c: catOf(r.kind) }));
       }
@@ -908,7 +1100,7 @@
     }, function () { myState = { errs: { medical_image: L("تعذّرت قراءة الصورة", "Could not read the image") }, val: d }; render(); });
   }
   // تصغير الصورة قبل حفظها بالمتصفح
-  function shrink(file) {
+  function shrink(file, max) {
     return new Promise(function (ok, bad) {
       var fr = new FileReader();
       fr.onerror = bad;
@@ -916,7 +1108,7 @@
         var img = new Image();
         img.onerror = bad;
         img.onload = function () {
-          var k = Math.min(1, 1200 / Math.max(img.width, img.height)), c = document.createElement("canvas");
+          var k = Math.min(1, (max || 1200) / Math.max(img.width, img.height)), c = document.createElement("canvas");
           c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
           c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
           ok(c.toDataURL("image/jpeg", 0.75));
@@ -987,14 +1179,15 @@
       ["n", L("معتمد بانتظار التنفيذ", "Approved — to execute"), function (r) { return stage(r) === "exec" && !r.followups.length; }, true],
       ["f", L("يرجى المتابعة", "Follow-up needed"), function (r) { return stage(r) === "exec" && r.followups.length; }, true],
       ["d", L("تم عمل اللازم", "Completed"), function (r) { return stage(r) === "done"; }, true],
-      ["o", L("لدى جهة أخرى", "With another approver"), function (r) { return stage(r) === "pro"; }],
+      ["o", L("لدى جهة أخرى", "With another approver"), function (r) { return stage(r) === "pro" || stage(r) === "cmd"; }],
       ["r", L("مرفوض", "Rejected"), function (r) { return r.status === "r"; }],
       ["all", L("الكل", "All"), ALL]
     ], "queue", duty);
   }
   function reqDetails(r, u, mode) {
     var h = refLine(r);
-    h += '<p class="sub">' + esc(u.job_title) + " — " + L("هاتف: ", "Phone: ") + esc(u.phone) + (mode === "queue" ? " — " + L("مدني: ", "Civil ID: ") + esc(u.civil_id) : "") + "</p>";
+    h += '<p class="sub">' + esc(u.job_title) + " — " + T(ZAMS[u.zam || "m"]) + (u.mil_no ? " — " + L("رقم عسكري: ", "Mil. no.: ") + esc(u.mil_no) : "") + " — " + L("هاتف: ", "Phone: ") + esc(u.phone) +
+      (mode === "queue" ? " — " + L("مدني: ", "Civil ID: ") + esc(u.civil_id) : "") + "</p>";
     h += "<p>" + (r.perm_period ? T(PERIODS[r.perm_period]) + " — " : "") + dates(r) + "</p>" + extLine(r) + meetLine(r) + lateBox(r) + leaveBox(r);
     if (r.notes) h += "<p>" + esc(r.notes) + "</p>";
     if (r.med) h += '<p><a href="#" data-act="med" data-id="' + r.id + '">' + L("صورة الطبية", "Medical photo") + "</a></p>";
@@ -1017,6 +1210,9 @@
         if (can) h += (isAdm ? '<p class="wait">✍️ ' + L("توقيعك هنا يكون بالنيابة عن مسؤول المهنيين (بختمك)", "You sign here on behalf of the Professionals Officer (with your stamp)") + "</p>" : "") +
           decideForm("pro", r.id, isAdm ? L("اعتماد عن مسؤول المهنيين", "Approve for Professionals Officer") : L("اعتماد", "Approve"));
         else h += '<p class="wait">⏳ ' + L("بانتظار اعتماد مسؤول المهنيين", "Awaiting the Professionals Officer") + "</p>";
+      } else if (sg === "cmd") {
+        if (can) h += (isAdm ? '<p class="wait">✍️ ' + L("اعتمادك هنا بالنيابة عن ", "You approve here on behalf of ") + zcmdName(zamOf(r)) + "</p>" : "") + decideForm("cmd", r.id, L("اعتماد", "Approve"));
+        else h += '<p class="wait">⏳ ' + L("بانتظار اعتماد ", "Awaiting ") + zcmdName(zamOf(r)) + "</p>";
       } else if (sg === "clerk") {
         if (can) h += decideForm("decide", r.id, L("اعتماد", "Approve"));
         else h += '<p class="wait">⏳ ' + L("بانتظار اعتماد الإداري", "Awaiting the administrative clerk") + "</p>";
@@ -1025,7 +1221,7 @@
         h += '<form class="qa" data-f="qact" data-id="' + r.id + '"><input name="note" placeholder="' + L("المطلوب متابعته (للمتابعة فقط)", "What needs follow-up (follow-up only)") + '">' +
           '<button class="g" name="do" value="done">' + L("تم عمل اللازم", "Completed") + '</button><button class="o" name="do" value="follow">' + L("يرجى المتابعة", "Needs follow-up") + "</button></form>";
       }
-      if (mode === "queue" && u.phone && sg !== "pro" && sg !== "clerk") h += '<a class="wa" target="_blank" rel="noopener" href="' + waLink(r, u) + '">' + L("أرسل واتساب", "Send WhatsApp") + "</a>";
+      if (mode === "queue" && u.phone && sg !== "pro" && sg !== "cmd" && sg !== "clerk") h += '<a class="wa" target="_blank" rel="noopener" href="' + waLink(r, u) + '">' + L("أرسل واتساب", "Send WhatsApp") + "</a>";
       return h + "</div>";
     }).join("");
   }
@@ -1036,6 +1232,7 @@
     if (sg === "done") return ["g", L("تم عمل اللازم", "Completed")];
     if (sg === "exec") return r.followups.length ? ["f", L("يرجى المتابعة", "Follow-up needed")] : mode === "queue" ? ["y", L("بانتظار التنفيذ", "To execute")] : ["g", L("معتمد", "Approved")];
     if (sg === "pro") return ["y", mode === "pro" ? L("بانتظار اعتمادك", "Awaiting your approval") : L("بانتظار مسؤول المهنيين", "With Professionals Officer")];
+    if (sg === "cmd") return ["y", mode === "zam" ? L("بانتظار اعتمادك", "Awaiting your approval") : L("بانتظار ", "With ") + zcmdName(zamOf(r))];
     return ["y", mode === "queue" ? L("بانتظار اعتمادك", "Awaiting your approval") : L("بانتظار اعتماد الإداري", "With admin clerk")];
   }
   // رسالة واتساب جاهزة للموظف (أرقام الكويت 8 خانات + 965)
@@ -1131,7 +1328,8 @@
     ].filter(Boolean);
     var doc = letterhead() + '<div class="rt"><h1>' + L("نموذج طلب ", "Request form: ") + KR(r) + "</h1><p>" + L("رقم الصادر: ", "Outgoing no.: ") + esc(r.ref) + "</p></div>" +
       '<h3 class="sh">' + L("بيانات الموظف", "Employee details") + '</h3><table class="meta"><tr><th>' + L("الاسم", "Name") + "</th><td>" + esc(u.full_name) + "</td><th>" + L("المسمى", "Job title") + "</th><td>" + esc(u.job_title) + "</td></tr>" +
-      "<tr><th>" + L("الرقم المدني", "Civil ID") + "</th><td>" + esc(u.civil_id) + "</td><th>" + L("الهاتف", "Phone") + "</th><td>" + esc(u.phone) + "</td></tr></table>" +
+      "<tr><th>" + L("الرقم المدني", "Civil ID") + "</th><td>" + esc(u.civil_id) + "</td><th>" + L("الهاتف", "Phone") + "</th><td>" + esc(u.phone) + "</td></tr>" +
+      "<tr><th>" + L("نظام العمل", "Work system") + "</th><td>" + T(ZAMS[u.zam || "m"]) + "</td><th>" + L("الرقم العسكري", "Military no.") + "</th><td>" + esc(u.mil_no || "—") + "</td></tr></table>" +
       '<h3 class="sh">' + L("تفاصيل الطلب", "Request details") + '</h3><table class="meta det">' + rows.map(function (x) { return "<tr><th>" + x[0] + "</th><td>" + esc(x[1]) + "</td></tr>"; }).join("") + "</table>" +
       (r.followups.length ? '<h3 class="sh">' + L("المتابعات", "Follow-ups") + "</h3><table><thead><tr><th>#</th><th>" + L("المطلوب", "Required") + "</th><th>" + L("بواسطة", "By") + "</th><th>" + L("الوقت", "Time") + "</th></tr></thead><tbody>" +
         r.followups.map(function (f, i) { return "<tr><td>" + (i + 1) + "</td><td>" + esc(f.note) + "</td><td>" + esc(uname(f.by)) + "</td><td>" + ymdhm(f.at) + "</td></tr>"; }).join("") + "</tbody></table>" : "") +
@@ -1180,7 +1378,8 @@
   var statTemp = null;
   function statTabs(v) {
     return '<div class="stabs noprint"><a href="#/stats"' + (v !== "shift" ? ' class="on"' : "") + ">" + ic("chart") + L("الإحصائية العامة", "General statistics") + "</a>" +
-      '<a href="#/stats?v=shift"' + (v === "shift" ? ' class="on"' : "") + ">" + ic("calendar") + L("تقرير الزام", "Shift report") + "</a></div>";
+      '<a href="#/stats?v=shift"' + (v === "shift" ? ' class="on"' : "") + ">" + ic("calendar") + L("تقرير الزام", "Shift report") + "</a>" +
+      '<a href="#/stats?v=leaves"' + (v === "leaves" ? ' class="on"' : "") + ">" + ic("file") + ((me() || {}).role === "m" ? L("إجازات المهنيين", "Professionals leave") : L("إحصائية الإجازات", "Leave statistics")) + "</a></div>";
   }
   function approveBar(key, canOk, ok, label) {
     return '<div class="sbar noprint">' + (ok ? '<p class="msg ok">✔ ' + L("معتمد لهذه الطباعة فقط — يعود التقرير بدون اعتماد تلقائيًا بعد الطباعة.", "Approved for this printout only — it returns to unapproved automatically after printing.") + "</p>"
@@ -1212,6 +1411,8 @@
   }
   function viewStats(q, u) {
     if (q.v === "shift") return viewShift(q, u);
+    if (q.v === "leaves") return viewLeaves(q, u);
+    var proOnly = u.role === "m"; // مسؤول المهنيين: إحصائية المهنيين فقط
     var p = PER[q.p] ? q.p : "month", now = new Date(), since, until, end;
     var eu = q.e ? userById(+q.e) : null, eid = eu ? eu.id : 0;
     if (p === "week") { since = addDays(new Date(now.getFullYear(), now.getMonth(), now.getDate()), -7); until = new Date(+now + 6e4); end = now; }
@@ -1222,7 +1423,7 @@
       if (p === "year") until = new Date(since.getFullYear() + 1, 0, 1);
       end = addDays(until, -1);
     }
-    var D = load(), qs = D.reqs.filter(function (r) { var c = new Date(r.created); return c >= since && c < until && (!eid || r.user_id === eid); });
+    var D = load(), qs = D.reqs.filter(function (r) { var c = new Date(r.created); return c >= since && c < until && (!eid || r.user_id === eid) && (!proOnly || isPro(r)); });
     var kc = {}, tot = { all: 0, p: 0, a: 0, r: 0 }, late = 0, emp = {}, lv = { leave: [0, 0], emer: [0, 0], med: [0, 0], pleave: [0, 0], pexit: [0, 0], ext: [0, 0] };
     qs.forEach(function (r) {
       tot.all++; tot[r.status]++; if (lateOf(r)) late++;
@@ -1247,15 +1448,15 @@
     }).join("");
     var key = p + "|" + eid + "|" + ymd(since), canOk = "ams".indexOf(u.role) >= 0;
     if (statTemp && statTemp.key !== key) statTemp = null;
-    var ok = statTemp, people = D.users.slice().sort(function (a, b) { return a.full_name.localeCompare(b.full_name, "ar"); });
+    var ok = statTemp, people = D.users.filter(function (x) { return !proOnly || x.pro; }).sort(function (a, b) { return a.full_name.localeCompare(b.full_name, "ar"); });
     return statTabs("gen") +
       '<form class="flt noprint" data-f="filter" data-path="stats"><select name="e"><option value="">' + L("جميع الموظفين", "All employees") + "</option>" +
       people.map(function (x) { return '<option value="' + x.id + '"' + (x.id === eid ? " selected" : "") + ">" + esc(x.full_name) + " — " + esc(x.job_title) + "</option>"; }).join("") + '</select><select name="p">' +
       Object.keys(PER).map(function (k) { return '<option value="' + k + '"' + (k === p ? " selected" : "") + ">" + T(PER[k]) + "</option>"; }).join("") + "</select><button>" + L("عرض", "Show") + "</button></form>" +
       approveBar(key, canOk, ok, L("اعتماد وطباعة هذه الإحصائية", "Approve & print this report")) +
       '<div class="rep">' + letterhead(L("تاريخ الإصدار", "Issued on")) +
-      '<div class="rt"><h1>' + L("تقرير إحصائية الطلبات الإدارية", "Administrative Requests Statistics") + "</h1><p>" + T(PER[p]) + (eu ? " — " + esc(eu.full_name) : "") + "</p></div>" +
-      rinfo([[L("الفترة", "Period"), L("من ", "") + ymd(since) + L(" إلى ", " → ") + ymd(end)], [L("الموظف", "Employee"), eu ? esc(eu.full_name) + " <small>(" + esc(eu.job_title) + ")</small>" : L("جميع الموظفين", "All employees")],
+      '<div class="rt"><h1>' + (proOnly ? L("تقرير إحصائية المهنيين", "Professionals Statistics") : L("تقرير إحصائية الطلبات الإدارية", "Administrative Requests Statistics")) + "</h1><p>" + T(PER[p]) + (eu ? " — " + esc(eu.full_name) : "") + "</p></div>" +
+      rinfo([[L("الفترة", "Period"), L("من ", "") + ymd(since) + L(" إلى ", " → ") + ymd(end)], [L("الموظف", "Employee"), eu ? esc(eu.full_name) + " <small>(" + esc(eu.job_title) + ")</small>" : proOnly ? L("جميع المهنيين", "All professionals") : L("جميع الموظفين", "All employees")],
         [L("الاعتماد", "Approval"), ok ? esc(nameLine(userById(ok.by) || {})) : '<span class="muted">' + L("غير معتمدة", "Not approved") + "</span>"], [L("وقت الإصدار", "Issued at"), ymdhm(now.toISOString())]]) +
       skp([["list", tot.all, L("إجمالي الطلبات", "Total requests"), "c-navy"], ["clock", tot.p, L("قيد الاعتماد", "Pending"), "c-blue"], ["check", tot.a, L("معتمد", "Approved"), "c-green"],
         ["x", tot.r, L("مرفوض", "Rejected"), "c-red"], ["bell", late, L("مقدّمة متأخرة", "Submitted late"), "c-orange"], ["calendar", ld, L("أيام الإجازات", "Leave days"), "c-purple"]]) +
@@ -1365,7 +1566,7 @@
         : '<div class="fh"><b>' + (dutyOn(e) ? "🟢 " : "🔴 ") + esc(dutyName(e)) + '</b><button type="button" class="pbtn del" data-act="duty-del" data-id="' + e.id + '">🗑 ' + L("حذف من الجدول", "Remove") + "</button></div>" +
           '<p class="sub">' + esc(dutyRule(e)) + " — " + esc(shiftSpanTxt(e)) + " — " + (dutyOn(e) ? L("مداوم اليوم", "on duty today") : L("غير مداوم اليوم", "off today") + (nd ? L("، مداومته القادمة ", ", next duty ") + T(WD[nd.getDay()]) + " " + ymd(nd) : "")) + "</p>") +
       '<div class="row"><div class="fld"><label>' + L("من حسابات النظام", "System account") + '</label><select name="uid">' + opt("", L("— اسم من خارج النظام —", "— not a system user —"), !e.uid) +
-      load().users.map(function (u) { return opt(u.id, esc(u.full_name) + " (" + roleName(u.role) + ")", e.uid === u.id); }).join("") + "</select></div>" +
+      load().users.map(function (u) { return opt(u.id, esc(u.full_name) + " (" + roleOf(u) + ")", e.uid === u.id); }).join("") + "</select></div>" +
       '<div class="fld"><label>' + L("الاسم (لمن ليس له حساب)", "Name (if no account)") + '</label><input name="name" dir="auto" value="' + esc(e.uid ? "" : e.name) + '"></div></div>' +
       '<div class="row"><div class="fld"><label>' + L("رقم الواتساب (8 أرقام)", "WhatsApp number (8 digits)") + '</label><input name="phone" inputmode="numeric" maxlength="8" value="' + esc(e.phone) +
       '" placeholder="' + esc(e.uid ? (userById(e.uid) || {}).phone || "" : "") + '"></div>' +
@@ -1435,26 +1636,31 @@
   function viewUsers(q) {
     var D = load(), eu = q.edit ? userById(+q.edit) : null;
     var rows = D.users.map(function (u) {
-      return "<tr" + (eu && eu.id === u.id ? ' class="sel"' : "") + "><td><b>" + esc(u.username) + "</b></td><td>" + (u.rank ? "<small>" + esc(u.rank) + "</small><br>" : "") + esc(u.full_name) + "</td><td>" + esc(u.job_title) +
-        (u.pro ? ' <span class="chip">' + L("مهني", "Professional") + "</span>" : "") + '</td><td dir="ltr">' + esc(u.phone) + '</td><td dir="ltr">' + esc(u.civil_id) + "</td><td>" + roleName(u.role) +
-        '</td><td><div class="stamps c">' + stamp(u.id, roleName(u.role), null, "", true) + '</div></td><td><a class="pbtn" href="#/users?edit=' + u.id + '">✏️ ' + L("تعديل", "Edit") + "</a></td></tr>";
+      return "<tr" + (eu && eu.id === u.id ? ' class="sel"' : "") + '><td><div class="uwho">' + avaHtml(u) + "<b>" + esc(u.username) + "</b></div></td><td>" + (u.rank ? "<small>" + esc(u.rank) + "</small><br>" : "") + esc(u.full_name) +
+        (u.mil_no ? '<br><small dir="ltr">' + L("عسكري: ", "Mil. no.: ") + esc(u.mil_no) + "</small>" : "") + "</td><td>" + esc(u.job_title) +
+        (u.pro ? ' <span class="chip">' + L("مهني", "Professional") + "</span>" : "") + "</td><td>" + T(ZAMS[u.zam || "m"]) + '</td><td dir="ltr">' + esc(u.phone) + '</td><td dir="ltr">' + esc(u.civil_id) + "</td><td>" + roleOf(u) +
+        '</td><td><div class="stamps c">' + stamp(u.id, roleOf(u), null, "", true) + '</div></td><td><a class="pbtn" href="#/users?edit=' + u.id + '">✏️ ' + L("تعديل", "Edit") + "</a></td></tr>";
     }).join("");
     return (eu ? userEditForm(eu) : "") +
-      "<h2>" + L("الموظفون والصلاحيات", "Staff & permissions") + '</h2><p class="sub">' + L("اضغط «تعديل» لتغيير أي بيانات تخص الموظف: الاسم، الرتبة، المسمى، الهاتف، الرقم المدني، اسم المستخدم، الصلاحية، المهنيين، وكلمة المرور. الاسم والرتبة والمسمى هي ما يظهر في الختم.",
-        "Click “Edit” to change anything about an employee: name, rank, title, phone, civil ID, username, role, professional status and password. Name, rank and title appear on the stamp.") + "</p>" +
-      '<div class="tw"><table class="ut"><thead><tr><th>' + L("المستخدم", "User") + "</th><th>" + L("الاسم", "Name") + "</th><th>" + L("المسمى", "Title") + "</th><th>" + L("الهاتف", "Phone") + "</th><th>" + L("الرقم المدني", "Civil ID") + "</th><th>" +
+      "<h2>" + L("الموظفون والصلاحيات", "Staff & permissions") + '</h2><p class="sub">' + L("اضغط «تعديل» لتغيير أي بيانات تخص الموظف: الاسم، الرتبة، المسمى، الهاتف، الرقم المدني، الرقم العسكري، نظام العمل، الصورة، اسم المستخدم (عربي أو إنجليزي)، الصلاحية (ومنها أمر الزام)، المهنيين، وكلمة المرور.",
+        "Click “Edit” to change anything about an employee: name, rank, title, phone, civil ID, military no., work system, photo, username (Arabic or English), role (including shift commander), professional status and password.") + "</p>" +
+      '<div class="tw"><table class="ut"><thead><tr><th>' + L("المستخدم", "User") + "</th><th>" + L("الاسم", "Name") + "</th><th>" + L("المسمى", "Title") + "</th><th>" + L("نظام العمل", "Work system") + "</th><th>" + L("الهاتف", "Phone") + "</th><th>" + L("الرقم المدني", "Civil ID") + "</th><th>" +
       L("الصلاحية", "Role") + "</th><th>" + L("الختم", "Stamp") + "</th><th></th></tr></thead><tbody>" + rows + "</tbody></table></div>";
   }
+  function roleOpts() {
+    return { e: roleName("e"), m: roleName("m"), h: roleName("h"), o: roleName("o"), a: roleName("a"), z1: zcmdName("1"), z2: zcmdName("2"), z3: zcmdName("3") };
+  }
   function userEditForm(u) {
-    var s = editState, e = s.errs, v = s.val && s.val.id === u.id ? s.val : u;
+    var s = editState, e = s.errs, v = s.val && s.val.id === u.id ? s.val : Object.assign({}, u, { role: u.role === "z" ? "z" + u.zam_cmd : u.role });
     editState = { errs: {}, val: null };
-    var ro = { e: roleName("e"), m: roleName("m"), h: roleName("h"), o: roleName("o"), a: roleName("a") };
     return '<form class="box uedit" data-f="useredit" data-id="' + u.id + '"><div class="fh"><b>✏️ ' + L("تعديل بيانات: ", "Edit: ") + esc(u.full_name) + '</b><a href="#/users">✕ ' + L("إغلاق", "Close") + "</a></div>" +
+      '<div class="uphoto">' + avaHtml(u) + field("photo", L("تغيير الصورة الشخصية", "Change profile photo"), { type: "file", accept: "image/*" }, e) + "</div>" +
       '<div class="row">' + field("full_name", L("الاسم الكامل", "Full name"), { required: "", dir: "auto" }, e, v.full_name) + field("rank", L("الرتبة (تظهر في الختم)", "Rank (shown on the stamp)"), { dir: "auto" }, e, v.rank) + "</div>" +
-      '<div class="row">' + field("job_title", L("المسمى الوظيفي", "Job title"), { required: "", dir: "auto" }, e, v.job_title) + field("username", L("اسم المستخدم", "Username"), { required: "", dir: "ltr" }, e, v.username) + "</div>" +
+      '<div class="row">' + field("job_title", L("المسمى الوظيفي", "Job title"), { required: "", dir: "auto" }, e, v.job_title) + field("username", L("اسم المستخدم (عربي أو إنجليزي)", "Username (Arabic or English)"), { required: "", dir: "auto" }, e, v.username) + "</div>" +
       '<div class="row">' + field("phone", L("رقم الهاتف (8 أرقام)", "Phone (8 digits)"), { required: "", inputmode: "numeric", maxlength: "8", dir: "ltr" }, e, v.phone) +
       field("civil_id", L("الرقم المدني (12 رقمًا)", "Civil ID (12 digits)"), { required: "", inputmode: "numeric", maxlength: "12", dir: "ltr" }, e, v.civil_id) + "</div>" +
-      '<div class="row">' + (u.role === "s" ? '<div class="fld"><label>' + L("الصلاحية", "Role") + "</label><input value=\"" + roleName("s") + '" readonly></div>' : select("role", L("الصلاحية", "Role"), ro, e, v.role)) +
+      '<div class="row">' + field("mil_no", L("الرقم العسكري", "Military number"), { inputmode: "numeric", maxlength: "12", dir: "ltr" }, e, v.mil_no) + select("zam", L("نظام العمل", "Work system"), opts(ZAMS), e, v.zam || "m") + "</div>" +
+      '<div class="row">' + (u.role === "s" ? '<div class="fld"><label>' + L("الصلاحية", "Role") + "</label><input value=\"" + roleName("s") + '" readonly></div>' : select("role", L("الصلاحية (أمر الزام يمنحه مدير النظام فقط)", "Role (only the admin grants shift commander)"), roleOpts(), e, v.role)) +
       field("password", L("كلمة مرور جديدة (اتركها فارغة بدون تغيير)", "New password (leave blank to keep)"), { type: "password", autocomplete: "new-password" }, e) + "</div>" +
       '<label class="chk"><input type="checkbox" name="pro"' + (v.pro ? " checked" : "") + "> " + L("مهني — تابع لمسؤول المهنيين (طلباته يعتمدها مسؤول المهنيين)", "Professional — under the Professionals Officer (their requests are approved by the Professionals Officer)") + "</label>" +
       '<p><button class="p">' + L("حفظ البيانات", "Save details") + '</button> <a class="pbtn" href="#/users">' + L("إلغاء", "Cancel") + "</a></p></form>";
@@ -1462,22 +1668,30 @@
   function doUserEdit(form) {
     var who = me(); if (!who || who.role !== "s") return render();
     var D = load(), u = userById(+form.dataset.id); if (!u) return render();
-    var d = formData(form), e = {}, cid = enDigits(d.civil_id || ""), ph = enDigits(d.phone || "");
+    var d = formData(form), e = {}, cid = enDigits(d.civil_id || ""), ph = enDigits(d.phone || ""), mil = enDigits(d.mil_no || ""), file = form.photo && form.photo.files[0];
     if (!d.full_name) e.full_name = req();
     if (!d.job_title) e.job_title = req();
-    if (!/^[\w.@+-]{1,150}$/.test(d.username || "")) e.username = L("اسم مستخدم غير صالح (حروف إنجليزية وأرقام فقط)", "Invalid username (English letters and digits only)");
+    if (!/^[\p{L}\p{N}._@+-]{1,150}$/u.test(d.username || "")) e.username = L("اسم مستخدم غير صالح (حروف عربية أو إنجليزية وأرقام بدون مسافات)", "Invalid username (Arabic or English letters and digits, no spaces)");
     else if (D.users.some(function (x) { return x.id !== u.id && x.username.toLowerCase() === d.username.toLowerCase(); })) e.username = L("اسم المستخدم مستخدم من قبل", "Username already taken");
     if (!/^\d{8}$/.test(ph)) e.phone = L("رقم الهاتف يجب أن يكون 8 أرقام", "Phone number must be 8 digits");
     if (!/^\d{12}$/.test(cid)) e.civil_id = L("الرقم المدني يجب أن يكون 12 رقمًا", "Civil ID must be 12 digits");
+    if (mil && !/^\d{3,12}$/.test(mil)) e.mil_no = L("الرقم العسكري أرقام فقط", "Military number must be digits");
     if (d.password && d.password.length < 6) e.password = L("كلمة المرور 6 أحرف على الأقل", "Password must be at least 6 characters");
-    if (u.role !== "s" && !ROLES[d.role]) e.role = L("اختر الصلاحية", "Choose a role");
+    if (u.role !== "s" && !roleOpts()[d.role]) e.role = L("اختر الصلاحية", "Choose a role");
+    if (file && !/^image\//.test(file.type)) e.photo = L("يجب أن يكون الملف صورة", "The file must be an image");
     if (Object.keys(e).length) { editState = { errs: e, val: Object.assign({ id: u.id, pro: !!d.pro }, d) }; flash("err", L("راجع الحقول المظللة", "Please check the highlighted fields")); return render(); }
-    u.full_name = d.full_name.replace(/\s+/g, " "); u.rank = d.rank || ""; u.job_title = d.job_title; u.username = d.username; u.phone = ph; u.civil_id = cid; u.pro = !!d.pro;
-    if (u.role !== "s" && d.role !== "s") u.role = d.role;
-    if (d.password) u.password = d.password;
-    log("user_edit", null, u.username); save();
-    flash("ok", L("تم حفظ بيانات ", "Saved details of ") + u.full_name);
-    go("users");
+    (file ? shrink(file, 320) : Promise.resolve(null)).then(function (img) {
+      u.full_name = d.full_name.replace(/\s+/g, " "); u.rank = d.rank || ""; u.job_title = d.job_title; u.username = d.username; u.phone = ph; u.civil_id = cid; u.pro = !!d.pro;
+      u.mil_no = mil; u.zam = ZAMS[d.zam] ? d.zam : "m"; if (img) u.photo = img;
+      if (u.role !== "s") {
+        if (/^z[123]$/.test(d.role)) { u.role = "z"; u.zam_cmd = d.role.charAt(1); u.job_title = "أمر " + ZAMS[u.zam_cmd][0]; } // المسمى يعطيه مدير النظام فقط
+        else { u.role = d.role; u.zam_cmd = ""; }
+      }
+      if (d.password) u.password = d.password;
+      log("user_edit", null, u.username); save();
+      flash("ok", L("تم حفظ بيانات ", "Saved details of ") + u.full_name);
+      go("users");
+    }, function () { flash("err", L("تعذّرت قراءة الصورة", "Could not read the image")); render(); });
   }
 
   function viewAudit(q) {
@@ -1498,7 +1712,8 @@
     var f = ev.target, kind = f.dataset.f; if (!kind) return;
     ev.preventDefault();
     if (kind === "login") doLogin(formData(f));
-    else if (kind === "register") doRegister(formData(f));
+    else if (kind === "register") doRegister(f);
+    else if (kind === "cmd") doCmd(f, ev.submitter);
     else if (kind === "req") doReq(f);
     else if (kind === "pro") doPro(f, ev.submitter);
     else if (kind === "decide") doDecide(f, ev.submitter);
@@ -1548,6 +1763,14 @@
     else if (act === "print-req") { var pr = reqById(+b.dataset.id); if (pr && u0 && canSee(u0, pr)) { closeModal(); printReq(pr); } }
     else if (act === "print-list") printList();
     else if (act === "open-req") { var orq = reqById(+b.dataset.id); if (orq && u0 && canSee(u0, orq)) openReq(orq); }
+    else if (act === "mday") { document.getElementById("meet-pick").innerHTML = meetPicker(b.dataset.d, ""); }
+    else if (act === "mslot") { var mdv = document.getElementById("f_date_from").value; document.getElementById("meet-pick").innerHTML = meetPicker(mdv, b.dataset.t); }
+    else if (act === "mblock" && u0 && "hs".indexOf(u0.role) >= 0) {
+      var MB = load().meetBlocks, md = b.dataset.d;
+      if (MB[md]) { delete MB[md]; log("munblock", null, md); flash("ok", L("تم فتح يوم ", "Reopened ") + md + L(" للحجز", " for booking")); }
+      else { MB[md] = { by: u0.id, at: new Date().toISOString() }; log("mblock", null, md); flash("ok", L("تم إغلاق يوم ", "Closed ") + md + L(" — لا يستطيع أحد الحجز فيه", " — nobody can book it")); }
+      save(); render();
+    }
     else if (act === "shift-copy") copyText(lastShift.text, b);
     else if (act === "shift-wa") window.open("https://wa.me/?text=" + encodeURIComponent(lastShift.text), "_blank", "noopener");
     else if (act === "shift-save") {
@@ -1565,7 +1788,7 @@
     else if (act === "stat-ok" && u0 && ("ams".indexOf(u0.role) >= 0 || (u0.role === "h" && b.dataset.key.indexOf("shift|") === 0))) {
       var sk = b.dataset.key.split("|"), se = +sk[1] ? userById(+sk[1]) : null;
       statTemp = { key: b.dataset.key, by: u0.id, at: new Date().toISOString() };
-      log("stat", null, (sk[0] === "shift" ? L("تقرير الزام", "Shift report") + " " + (sk[2] || "").replace("T", " ") + L(" إلى ", " to ") + (sk[3] || "").replace("T", " ") : T(PER[sk[0]] || ["", ""])) + " — " + (se ? se.full_name : L("جميع الموظفين", "All employees"))); save();
+      log("stat", null, (sk[0] === "leaves" ? L("إحصائية الإجازات", "Leave statistics") + " " + sk[2] : sk[0] === "shift" ? L("تقرير الزام", "Shift report") + " " + (sk[2] || "").replace("T", " ") + L(" إلى ", " to ") + (sk[3] || "").replace("T", " ") : T(PER[sk[0]] || ["", ""])) + " — " + (se ? se.full_name : L("جميع الموظفين", "All employees"))); save();
       render();
       setTimeout(function () { window.print(); }, 350); // الختم يظهر بالطباعة، وبعدها يرجع التقرير طبيعي
     }

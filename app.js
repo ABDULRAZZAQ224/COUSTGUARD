@@ -436,7 +436,7 @@
     reveal: ["عرض الرقم السري", "Secret number viewed"], remind: ["تذكير الإداري", "Clerk reminded"], stat: ["اعتماد الإحصائية", "Statistics approved"],
     duty_add: ["إضافة إلى زام الإداري", "Added to duty roster"], duty_edit: ["تعديل زام الإداري", "Duty roster edited"], duty_del: ["حذف من زام الإداري", "Removed from duty roster"], user_edit: ["تعديل بيانات موظف", "Employee details edited"],
     cmd_ok: ["اعتماد أمر الزام", "Shift commander approval"], cmd_rej: ["رفض أمر الزام", "Shift commander rejection"],
-    mblock: ["إغلاق يوم للمقابلات", "Meeting day closed"], munblock: ["فتح يوم للمقابلات", "Meeting day reopened"]
+    mblock: ["إغلاق يوم للمقابلات", "Meeting day closed"], pwd_change: ["تغيير كلمة المرور", "Password changed"], pwd_view: ["عرض كلمة مرور موظف", "Viewed an employee password"], munblock: ["فتح يوم للمقابلات", "Meeting day reopened"]
   };
   function log(act, rid, x) {
     var u = me();
@@ -469,6 +469,7 @@
     users: { roles: "s", view: viewUsers },
     zam: { roles: "zs", view: viewZam },
     meetcal: { roles: "hs", view: viewMeetCal },
+    account: { roles: "emhoasz", view: viewAccount },
     audit: { roles: "hs", view: viewAudit },
     duty: { roles: "s", view: viewDuty }
   };
@@ -556,8 +557,8 @@
       '<a class="brand" href="#/home">' + logos() + '<span><b>' + T(ORG) + "</b><small>" + T(DEPT) + "</small></span></a>" +
       '<div class="tinfo"><span class="ti">' + ic("clock") + '<b id="clk">' + hm() + '</b></span><span class="ti">' + ic("calendar") + '<b id="dte">' + dateLong() + "</b></span>" +
       '<a class="bell" href="' + c.bellHref + '" title="' + L("بانتظار إجراء", "Awaiting action") + '">' + ic("bell") + (c.bell ? "<i>" + c.bell + "</i>" : "") + "</a>" +
-      '<span class="who"><small>' + L("أهلًا وسهلًا", "Welcome") + "</small><b>" + esc(titleName(u)) + "</b></span>" +
-      avaHtml(u, roleOf(u)) + "</div></header>";
+      '<a class="who" href="#/account" title="' + L("حسابي", "My account") + '"><small>' + L("أهلًا وسهلًا", "Welcome") + "</small><b>" + esc(titleName(u)) + "</b></a>" +
+      '<a class="ava-l" href="#/account" title="' + L("حسابي — تغيير كلمة المرور", "My account — change password") + '">' + avaHtml(u) + "</a></div></header>";
   }
   function sideNav(u, r, c) {
     var cur = r.path, f = r.q.f || "";
@@ -585,7 +586,8 @@
         item("#/stats", L("الإحصائيات والتقارير", "Statistics & reports"), "chart", "mhoas", 0, cur === "stats"),
         item("#/audit", L("سجل العمليات", "Audit log"), "history", "hs", 0, cur === "audit")
       ]) +
-      '<div class="sg">' + '<button type="button" data-act="lang">' + ic("globe") + "<span>" + L("English", "عربي") + "</span></button>" +
+      '<div class="sg">' + '<a href="#/account"' + (cur === "account" ? ' class="on"' : "") + ">" + ic("user") + "<span>" + L("حسابي وكلمة المرور", "My account & password") + "</span></a>" +
+      '<button type="button" data-act="lang">' + ic("globe") + "<span>" + L("English", "عربي") + "</span></button>" +
       '<button type="button" data-act="logout">' + ic("logout") + "<span>" + L("تسجيل الخروج", "Log out") + "</span></button></div></div>";
   }
   function tabbar(u, r) {
@@ -696,7 +698,7 @@
       '<ellipse cx="130" cy="85" rx="88" ry="50" fill="none" stroke="currentColor" stroke-width="1.5"/>' +
       '<text x="26" y="89" font-size="12" text-anchor="middle">★</text><text x="234" y="89" font-size="12" text-anchor="middle">★</text></svg>';
     return '<div class="stamp' + (tone ? " " + tone : "") + (mini ? " mini" : "") + '" style="--rot:' + rot + 'deg" title="' + esc(label + " — " + nameLine(u)) + '">' + svg + '<div class="ring"></div>' +
-      '<div class="sc"><em>' + esc(label) + "</em>" + (u.rank ? "<small>" + esc(u.rank) + "</small>" : "") + "<b>" + esc(u.full_name) + "</b><span>" + esc(u.job_title) + "</span>" +
+      '<div class="sc"><em>' + esc(label) + "</em>" + (u.rank ? "<small>" + esc(u.rank) + "</small>" : "") + "<b>" + esc(u.full_name) + "</b>" + (u.job_title && label.indexOf(u.job_title) < 0 ? "<span>" + esc(u.job_title) + "</span>" : "") +
       (at ? "<i>" + ymdhm(at) + "</i>" : "") + "</div></div>";
   }
   // كلام إطار الختم: SVG textPath يقطّع الحروف العربية في Safari/الآيفون،
@@ -1667,19 +1669,47 @@
   }
   // الموظفون والصلاحيات: جدول + نموذج تعديل كامل لبيانات الموظف (مدير النظام)
   var editState = { errs: {}, val: null };
+  /* ---------- حسابي: بيانات الموظف + تغيير كلمة المرور ---------- */
+  var pwState = { errs: {} };
+  function viewAccount(q, u) {
+    var e = pwState.errs; pwState = { errs: {} };
+    return "<h2>" + L("حسابي", "My account") + "</h2>" +
+      '<div class="card acc"><div class="acc-h">' + avaHtml(u) + "<div><b>" + esc(titleName(u)) + "</b><small>" + roleOf(u) + (u.rank ? " — " + esc(u.rank) : "") + "</small></div></div>" +
+      rinfo([[L("اسم المستخدم", "Username"), esc(u.username)], [L("الرقم المدني", "Civil ID"), esc(u.civil_id)], [L("الهاتف", "Phone"), esc(u.phone)], [L("نظام العمل", "Work system"), T(ZAMS[u.zam || "m"])]]) +
+      (u.mil_no ? '<p class="sub">' + L("الرقم العسكري: ", "Military no.: ") + esc(u.mil_no) + "</p>" : "") + "</div>" +
+      '<form class="box" data-f="pwd"><div class="fh"><b>🔑 ' + L("تغيير كلمة المرور", "Change password") + "</b></div>" +
+      field("old", L("كلمة المرور الحالية", "Current password"), { type: "password", required: "", autocomplete: "current-password" }, e) +
+      '<div class="row">' + field("new1", L("كلمة المرور الجديدة", "New password"), { type: "password", required: "", autocomplete: "new-password" }, e) +
+      field("new2", L("تأكيد كلمة المرور الجديدة", "Confirm new password"), { type: "password", required: "", autocomplete: "new-password" }, e) + "</div>" +
+      '<p class="note-u">📌 ' + L("نسيت كلمة المرور الحالية؟ تواصل مع <b>مدير النظام</b> ليغيّرها لك من صفحة الموظفين.", "Forgot your current password? Ask the <b>System Administrator</b> to change it for you from the staff page.") + "</p>" +
+      '<p><button class="p">' + L("حفظ كلمة المرور الجديدة", "Save new password") + "</button></p></form>";
+  }
+  function doPwd(form) {
+    var u = me(); if (!u) return render();
+    var d = formData(form), e = {};
+    if (d.old !== u.password) e.old = L("كلمة المرور الحالية غير صحيحة", "Current password is incorrect");
+    if ((d.new1 || "").length < 6) e.new1 = L("كلمة المرور 6 أحرف على الأقل", "Password must be at least 6 characters");
+    else if (d.new1 === d.old) e.new1 = L("اختر كلمة مرور مختلفة عن الحالية", "Choose a password different from the current one");
+    else if (d.new1 !== d.new2) e.new2 = L("كلمتا المرور غير متطابقتين", "Passwords do not match");
+    if (Object.keys(e).length) { pwState = { errs: e }; return render(); }
+    u.password = d.new1; log("pwd_change", null, u.username); save();
+    flash("ok", L("تم تغيير كلمة المرور بنجاح", "Password changed successfully")); render();
+  }
+
   function viewUsers(q) {
     var D = load(), eu = q.edit ? userById(+q.edit) : null;
     var rows = D.users.map(function (u) {
       return "<tr" + (eu && eu.id === u.id ? ' class="sel"' : "") + '><td><div class="uwho">' + avaHtml(u) + "<b>" + esc(u.username) + "</b></div></td><td>" + (u.rank ? "<small>" + esc(u.rank) + "</small><br>" : "") + esc(u.full_name) +
         (u.mil_no ? '<br><small dir="ltr">' + L("عسكري: ", "Mil. no.: ") + esc(u.mil_no) + "</small>" : "") + "</td><td>" + esc(u.job_title) +
         (u.pro ? ' <span class="chip">' + L("مهني", "Professional") + "</span>" : "") + "</td><td>" + T(ZAMS[u.zam || "m"]) + '</td><td dir="ltr">' + esc(u.phone) + '</td><td dir="ltr">' + esc(u.civil_id) + "</td><td>" + roleOf(u) +
+        '</td><td><span class="pwv" id="pw' + u.id + '">••••••</span> <button type="button" class="pbtn sm" data-act="showpw" data-id="' + u.id + '">👁 ' + L("إظهار", "Show") + "</button>" +
         '</td><td><div class="stamps c">' + stamp(u.id, roleOf(u), null, "", true) + '</div></td><td><a class="pbtn" href="#/users?edit=' + u.id + '">✏️ ' + L("تعديل", "Edit") + "</a></td></tr>";
     }).join("");
     return (eu ? userEditForm(eu) : "") +
       "<h2>" + L("الموظفون والصلاحيات", "Staff & permissions") + '</h2><p class="sub">' + L("اضغط «تعديل» لتغيير أي بيانات تخص الموظف: الاسم، الرتبة، المسمى، الهاتف، الرقم المدني، الرقم العسكري، نظام العمل، الصورة، اسم المستخدم (عربي أو إنجليزي)، الصلاحية (ومنها أمر الزام)، المهنيين، وكلمة المرور.",
         "Click “Edit” to change anything about an employee: name, rank, title, phone, civil ID, military no., work system, photo, username (Arabic or English), role (including shift commander), professional status and password.") + "</p>" +
       '<div class="tw"><table class="ut"><thead><tr><th>' + L("المستخدم", "User") + "</th><th>" + L("الاسم", "Name") + "</th><th>" + L("المسمى", "Title") + "</th><th>" + L("نظام العمل", "Work system") + "</th><th>" + L("الهاتف", "Phone") + "</th><th>" + L("الرقم المدني", "Civil ID") + "</th><th>" +
-      L("الصلاحية", "Role") + "</th><th>" + L("الختم", "Stamp") + "</th><th></th></tr></thead><tbody>" + rows + "</tbody></table></div>";
+      L("الصلاحية", "Role") + "</th><th>" + L("كلمة المرور", "Password") + "</th><th>" + L("الختم", "Stamp") + "</th><th></th></tr></thead><tbody>" + rows + "</tbody></table></div>";
   }
   function roleOpts() {
     return { e: roleName("e"), m: roleName("m"), h: roleName("h"), o: roleName("o"), a: roleName("a"), z1: zcmdName("1"), z2: zcmdName("2"), z3: zcmdName("3"),
@@ -1749,6 +1779,7 @@
     if (kind === "login") doLogin(formData(f));
     else if (kind === "register") doRegister(f);
     else if (kind === "cmd") doCmd(f, ev.submitter);
+    else if (kind === "pwd") doPwd(f);
     else if (kind === "req") doReq(f);
     else if (kind === "pro") doPro(f, ev.submitter);
     else if (kind === "decide") doDecide(f, ev.submitter);
@@ -1800,6 +1831,10 @@
     else if (act === "print-req") { var pr = reqById(+b.dataset.id); if (pr && u0 && canSee(u0, pr)) { closeModal(); printReq(pr); } }
     else if (act === "print-list") printList();
     else if (act === "open-req") { var orq = reqById(+b.dataset.id); if (orq && u0 && canSee(u0, orq)) openReq(orq); }
+    else if (act === "showpw" && u0 && u0.role === "s") {
+      var pu = userById(+b.dataset.id), sp = document.getElementById("pw" + b.dataset.id);
+      if (pu && sp) { sp.textContent = pu.password; sp.classList.add("on"); b.remove(); log("pwd_view", null, pu.username); save(); }
+    }
     else if (act === "mday") { document.getElementById("meet-pick").innerHTML = meetPicker(b.dataset.d, ""); }
     else if (act === "mslot") { var mdv = document.getElementById("f_date_from").value; document.getElementById("meet-pick").innerHTML = meetPicker(mdv, b.dataset.t); }
     else if (act === "mblock" && u0 && "hs".indexOf(u0.role) >= 0) {

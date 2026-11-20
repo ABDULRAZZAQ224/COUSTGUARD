@@ -635,6 +635,18 @@
     };
     return (M[u.role] || M[u.role === "o" ? "h" : "a"])[k];
   }
+  // آخر التنبيهات حسب الصلاحية: الموظف طلباته، أمر الزام موظفي زامه، مسؤول المهنيين المهنيين،
+  // الإداري الطلبات العادية (الصباحي + ما وصله من الزام والمهنيين)، ومدير النظام كل شيء
+  function alertOk(u, a) {
+    if ("sho".indexOf(u.role) >= 0) return true;
+    var r = a.rid ? reqById(a.rid) : null;
+    if (!r) return false;
+    if (r.user_id === u.id) return true;
+    if (u.role === "m") return isPro(r);
+    if (u.role === "z") return !isPro(r) && zamOf(r) === u.zam_cmd;
+    if (u.role === "a") return isPro(r) ? r.status === "a" : !inZam(r) || !!r.cmd_by;
+    return false;
+  }
   function dotOf(a) {
     return /^(ok|ok_late|pro_ok|cmd_ok|done|stat)$/.test(a.act) ? "g" : /^(rej|pro_rej|cmd_rej|auto)$/.test(a.act) ? "r" : /^(submit|late)$/.test(a.act) ? "b" : "o";
   }
@@ -649,7 +661,7 @@
       ["gray", "x", cnt(function (r) { return r.status === "r"; }), L("طلبات مرفوضة", "Rejected requests"), hrefFor(u, "r")]
     ];
     var latest = S.slice().sort(byCreated).slice(0, 5);
-    var alerts = load().audit.filter(function (a) { return u.role === "e" || u.role === "m" ? a.rid && ids[a.rid] : true; }).slice(0, 5);
+    var alerts = load().audit.filter(function (a) { return alertOk(u, a); }).slice(0, 5);
     var QK = [
       ["#/my", "plus", L("طلب جديد", "New request"), L("إجازة، مقابلة، طلبات أخرى…", "Leave, meeting, other requests…"), "emhoasz"],
       ["#/zam?f=w", "check", L("اعتماد الزام", "Shift approvals"), L("طلبات موظفي زامك", "Your shift's requests"), "z"],

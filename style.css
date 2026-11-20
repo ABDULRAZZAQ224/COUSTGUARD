@@ -554,3 +554,7 @@ table.mtab tr.blk td{background:#f1f5f9}
 .pwv{font-family:monospace;letter-spacing:1px;direction:ltr;display:inline-block}
 .pwv.on{background:#fff7e8;border:1px dashed #f59e0b;border-radius:6px;padding:0 6px;font-weight:800;color:#92400e}
 .pbtn.sm{padding:2px 8px;font-size:12px}
+
+/* ===== المتابعة: أين الطلب الآن ===== */
+.where{background:#f5f8fc;border:1px solid var(--line);border-inline-start:4px solid var(--navy2);border-radius:10px;padding:6px 10px;font-size:14px;color:#334155;margin:8px 0}
+.where b{color:var(--navy)}

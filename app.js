@@ -1201,13 +1201,31 @@
     ], "pro");
   }
   /* ضابط القسم / رئيس القسم: متابعة الطلبات للاطلاع فقط (الاعتماد عند الإداري ومسؤول المهنيين ومدير النظام) */
+  // أين الطلب الآن (للمتابعة): عند أمر أي زام، أو الإداري، أو مسؤول المهنيين، أو مكتمل
+  function whereNow(r) {
+    var sg = stage(r);
+    return sg === "cmd" ? zcmdName(zamOf(r)) : sg === "pro" ? L("مسؤول المهنيين", "the Professionals Officer")
+      : sg === "clerk" ? L("الإداري — للاعتماد", "the clerk — for approval") : sg === "exec" ? L("الإداري — للتنفيذ", "the clerk — for execution")
+      : sg === "done" ? L("مكتمل — تم عمل اللازم", "Completed") : L("مرفوض", "Rejected");
+  }
+  /* رئيس القسم وضابط القسم: متابعة كل الطلبات بدون اعتماد، ويظهر عند من الطلب الآن وفي أي زام */
   function viewReview(q, u) {
-    var intro = '<p class="msg">' + L("👁️ هذه الصفحة للاطلاع والمتابعة فقط — اعتماد الطلبات لدى الإداري ومسؤول المهنيين ومدير النظام.",
-      "👁️ This page is for viewing and follow-up only — requests are approved by the administrative clerk, the Professionals Officer and the System Administrator.") + "</p>";
+    var intro = '<p class="msg">' + L("👁️ متابعة جميع الطلبات للاطلاع فقط (بدون اعتماد) — يظهر لكل طلب نظام عمل صاحبه، وعند من الطلب الآن: أمر الزام، أو الإداري، أو مسؤول المهنيين.",
+      "👁️ Follow every request, view only (no approvals) — each request shows the requester's work system and who has it now: the shift commander, the clerk or the Professionals Officer.") + "</p>";
+    var byZ = function (z) { return function (r) { return !isPro(r) && zamOf(r) === z; }; };
     return listView("review", u, q, load().reqs, "p", [
       ["p", L("قيد الاعتماد", "Pending"), function (r) { return r.status === "p"; }, true],
-      ["a", L("معتمد", "Approved"), function (r) { return r.status === "a"; }, true],
-      ["late", L("مقدّمة متأخرة", "Submitted late"), function (r) { return !!lateOf(r); }, true],
+      ["cmd", L("عند أمر الزام", "With shift commander"), function (r) { return stage(r) === "cmd"; }, true],
+      ["clerk", L("عند الإداري للاعتماد", "With clerk for approval"), function (r) { return stage(r) === "clerk"; }, true],
+      ["exec", L("بانتظار التنفيذ", "Awaiting execution"), function (r) { return stage(r) === "exec"; }, true],
+      ["pro", L("عند مسؤول المهنيين", "With Professionals Officer"), function (r) { return stage(r) === "pro"; }],
+      ["done", L("مكتمل", "Completed"), function (r) { return stage(r) === "done"; }],
+      ["zm", L("موظفو الدوام الصباحي", "Morning staff"), byZ("m")],
+      ["z1", L("موظفو الزام الأول", "First shift staff"), byZ("1")],
+      ["z2", L("موظفو الزام الثاني", "Second shift staff"), byZ("2")],
+      ["z3", L("موظفو الزام الثالث", "Third shift staff"), byZ("3")],
+      ["prof", L("المهنيون", "Professionals"), function (r) { return isPro(r); }],
+      ["late", L("مقدّمة متأخرة", "Submitted late"), function (r) { return !!lateOf(r); }],
       ["r", L("مرفوض", "Rejected"), function (r) { return r.status === "r"; }],
       ["all", L("الكل", "All"), ALL]
     ], "review", intro);
@@ -1251,6 +1269,8 @@
     return items.map(function (r) {
       var u = userById(r.user_id) || {}, st = pill(r, mode), sg = stage(r), can = canAct(who, r);
       var h = '<div class="card"><div class="ch"><h3>' + esc(u.full_name) + " — " + KR(r) + "</h3>" + chr(r, st) + "</div>" + reqDetails(r, u, mode);
+      if (mode === "review" || mode === "view") h += '<p class="where">📍 ' + L("الطلب حاليًا عند: ", "Currently with: ") + "<b>" + whereNow(r) + "</b> — " +
+        (isPro(r) ? L("مهني", "Professional") : T(ZAMS[zamOf(r)])) + "</p>";
       if (mode === "view") return h + "</div>";
       if (sg === "pro") {
         if (can) h += (isAdm ? '<p class="wait">✍️ ' + L("توقيعك هنا يكون بالنيابة عن مسؤول المهنيين (بختمك)", "You sign here on behalf of the Professionals Officer (with your stamp)") + "</p>" : "") +
